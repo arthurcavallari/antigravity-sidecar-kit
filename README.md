@@ -203,7 +203,7 @@ antigravity-sidecar-kit/
     ├── rpc.test.mjs
     ├── theme.test.mjs
     ├── setup-server.test.mjs
-    └── workspace.test.mjs      # Includes <= 300 line ceiling check across all files
+    └── workspace.test.mjs
 ```
 
 ---
