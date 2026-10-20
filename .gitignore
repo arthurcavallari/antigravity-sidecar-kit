@@ -1,4 +1,12 @@
 node_modules/
-.idea/
-.DS_Store
+*.tgz
 *.log
+npm-debug.log*
+.env
+.env.*
+coverage/
+tmp/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
