@@ -142,7 +142,7 @@ await app.run();
 End-to-end `setup.mjs` runner supporting `npx`, local git checkouts, and `--uninstall`.
 
 ```js
-import { runSidecarSetup } from 'antigravity-sidecar-kit/setup';
+import { bundleSidecarKit, runSidecarSetup } from 'antigravity-sidecar-kit/setup';
 
 await runSidecarSetup({
   sidecarId: 'my-sidecar',
