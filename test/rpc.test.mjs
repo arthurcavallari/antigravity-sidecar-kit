@@ -28,18 +28,9 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       });
       assert.equal(saved, true);
 
-      const prevAddr = process.env.ANTIGRAVITY_LS_ADDRESS;
-      const prevCsrf = process.env.ANTIGRAVITY_CSRF_TOKEN;
-      delete process.env.ANTIGRAVITY_LS_ADDRESS;
-      delete process.env.ANTIGRAVITY_CSRF_TOKEN;
-      try {
-        const cfg = getLsConfig({ sidecarDataRoot: dir });
-        assert.equal(cfg.lsAddress, '127.0.0.1:59999');
-        assert.equal(cfg.csrfToken, 'cached-token-abc');
-      } finally {
-        if (prevAddr !== undefined) process.env.ANTIGRAVITY_LS_ADDRESS = prevAddr;
-        if (prevCsrf !== undefined) process.env.ANTIGRAVITY_CSRF_TOKEN = prevCsrf;
-      }
+      const cfg = getLsConfig({ sidecarDataRoot: dir, env: {} });
+      assert.equal(cfg.lsAddress, '127.0.0.1:59999');
+      assert.equal(cfg.csrfToken, 'cached-token-abc');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
