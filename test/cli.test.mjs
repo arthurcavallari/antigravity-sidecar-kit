@@ -12,7 +12,7 @@ const CLI = join(ROOT, 'bin', 'cli.mjs');
 describe('antigravity-sidecar-kit CLI', () => {
   it('exposes a bin named after the package so `npx antigravity-sidecar-kit` resolves', () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-    assert.equal(pkg.bin[pkg.name], './bin/cli.mjs');
+    assert.equal(pkg.bin[pkg.name], 'bin/cli.mjs');
   });
 
   it('prints usage and exits 0 for --help, exits 1 without a name', () => {

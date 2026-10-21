@@ -33,9 +33,9 @@
     "./scaffolder": "./lib/scaffolder.mjs"
   },
   "bin": {
-    "antigravity-sidecar-kit": "./bin/cli.mjs",
-    "create-antigravity-sidecar": "./bin/cli.mjs",
-    "agy-sidecar-kit": "./bin/cli.mjs"
+    "antigravity-sidecar-kit": "bin/cli.mjs",
+    "create-antigravity-sidecar": "bin/cli.mjs",
+    "agy-sidecar-kit": "bin/cli.mjs"
   },
   "keywords": [
     "antigravity",
