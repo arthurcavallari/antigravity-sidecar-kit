@@ -13,13 +13,15 @@ Google Antigravity's built-in `sidecar_sdk` provides a minimal `SidecarApp` loop
 Generate a complete, Hangar-compatible Antigravity Auxiliary Pane sidecar in one command:
 
 ```bash
-npx antigravity-sidecar-kit init my-sidecar
+npm create antigravity-sidecar my-sidecar
 cd antigravity-my-sidecar
 npm install
 npm run setup
 ```
 
 Options: `--dir <target-dir>` to choose the output folder, `--force` to overwrite an existing scaffold.
+
+`npm create antigravity-sidecar` runs the [`create-antigravity-sidecar`](https://www.npmjs.com/package/create-antigravity-sidecar) launcher. `npx antigravity-sidecar-kit init my-sidecar` does the same thing.
 
 What gets generated:
 - `package.json` — ESM configuration with `setup`, `start`, `uninstall`, and `test` scripts.
