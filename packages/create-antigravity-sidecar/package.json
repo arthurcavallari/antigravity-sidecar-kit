@@ -1,0 +1,41 @@
+{
+  "name": "create-antigravity-sidecar",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "npm create antigravity-sidecar: scaffold a Google Antigravity Auxiliary Pane sidecar (thin wrapper around antigravity-sidecar-kit).",
+  "license": "MIT",
+  "author": {
+    "name": "Arthur Cavallari",
+    "url": "https://github.com/arthurcavallari"
+  },
+  "homepage": "https://github.com/arthurcavallari/antigravity-sidecar-kit#readme",
+  "bugs": {
+    "url": "https://github.com/arthurcavallari/antigravity-sidecar-kit/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arthurcavallari/antigravity-sidecar-kit.git",
+    "directory": "packages/create-antigravity-sidecar"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "create-antigravity-sidecar": "bin/cli.mjs"
+  },
+  "dependencies": {
+    "antigravity-sidecar-kit": "^1.0.3"
+  },
+  "keywords": [
+    "create",
+    "antigravity",
+    "google-antigravity",
+    "antigravity-sidecar",
+    "scaffold"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

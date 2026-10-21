@@ -206,6 +206,8 @@ antigravity-sidecar-kit/
 │   ├── server.mjs              # SidecarApp asset & stylesheet route factories
 │   ├── workspace.mjs           # Workspace URI normalizer, glob matcher & trajectory resolver
 │   └── scaffolder.mjs          # Project template generator
+├── packages/
+│   └── create-antigravity-sidecar/   # `npm create antigravity-sidecar` launcher (published separately)
 └── test/
     ├── cli.test.mjs
     ├── config.test.mjs
@@ -216,6 +218,10 @@ antigravity-sidecar-kit/
 ```
 
 ---
+
+## Changes in 1.0.3
+
+- The CLI is exported as `antigravity-sidecar-kit/cli`, so launcher packages such as `create-antigravity-sidecar` can run it.
 
 ## Changes in 1.0.2
 

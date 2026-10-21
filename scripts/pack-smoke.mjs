@@ -40,12 +40,14 @@ try {
   }
 
   // Every exports subpath loads from the installed package
-  for (const subpath of Object.keys(pkg.exports)) {
+  // ./cli is an entrypoint: importing it runs the CLI, so it is exercised through the bins instead
+  const importable = Object.keys(pkg.exports).filter((subpath) => subpath !== './cli');
+  for (const subpath of importable) {
     const specifier = subpath === '.' ? pkg.name : `${pkg.name}/${subpath.slice(2)}`;
     run(`node --input-type=module -e "await import('${specifier}')"`, app);
   }
 
-  console.log(`[pack-smoke] ${filename}: bins, scaffold, and ${Object.keys(pkg.exports).length} exports OK`);
+  console.log(`[pack-smoke] ${filename}: bins, scaffold, and ${importable.length} exports OK`);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
