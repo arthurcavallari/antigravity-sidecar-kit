@@ -1,6 +1,6 @@
 {
   "name": "antigravity-sidecar-kit",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "type": "module",
   "description": "Zero-dependency SDK and CLI scaffolder for Google Antigravity Auxiliary Pane sidecars (Connect RPC client, host theme & Tailwind proxy, BOM-safe config store, workspace URI matcher, and npx-safe installer).",
   "license": "MIT",
