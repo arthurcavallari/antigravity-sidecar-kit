@@ -22,6 +22,20 @@ describe('antigravity-sidecar-kit/workspace normalization and glob matching', ()
     assert.equal(matchesWorkspaceRule('c:/Users/dev/frontend', ['c:/Projects/App']), false);
   });
 
+  it('keeps POSIX roots absolute and handles UNC URIs and single-character globs', () => {
+    assert.equal(normalizeWorkspacePath('file:///home/dev/app'), '/home/dev/app');
+    assert.equal(normalizeWorkspacePath('file:///Users/dev/My%20App/'), '/Users/dev/My App');
+    assert.equal(normalizeWorkspacePath('/home/dev/app/'), '/home/dev/app');
+    assert.equal(normalizeWorkspacePath('file:///'), '/');
+    assert.equal(normalizeWorkspacePath('file://server/share/repo'), '//server/share/repo');
+    assert.equal(normalizeWorkspacePath('C:\\Projects\\App\\'), 'c:/Projects/App');
+
+    assert.equal(matchesWorkspaceRule('file:///home/dev/app/web', ['/home/dev/app']), true);
+    assert.equal(matchesWorkspaceRule('/home/dev/app', ['file:///home/dev/app/']), true);
+    assert.equal(matchesWorkspaceRule('/home/dev/app2', ['/home/dev/app?']), true);
+    assert.equal(matchesWorkspaceRule('/home/dev/ap', ['/home/dev/app?']), false);
+  });
+
   it('resolves active workspace from trajectories sorted by lastUserViewTime', () => {
     const resolved = resolveActiveWorkspace({
       trajectoriesResponse: {

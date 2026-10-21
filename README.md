@@ -13,12 +13,13 @@ Google Antigravity's built-in `sidecar_sdk` provides a minimal `SidecarApp` loop
 Generate a complete, Hangar-compatible Antigravity Auxiliary Pane sidecar in one command:
 
 ```bash
-# Using npx create-* shorthand
-npx create-antigravity-sidecar my-sidecar
-
-# Or via the CLI binary directly
-npx agy-sidecar-kit init my-sidecar
+npx antigravity-sidecar-kit init my-sidecar
+cd antigravity-my-sidecar
+npm install
+npm run setup
 ```
+
+Options: `--dir <target-dir>` to choose the output folder, `--force` to overwrite an existing scaffold.
 
 What gets generated:
 - `package.json` — ESM configuration with `setup`, `start`, `uninstall`, and `test` scripts.
@@ -87,8 +88,8 @@ await manageSidecar('my-sidecar', 'SIDECAR_ACTION_RESTART');
 const customRes = await callLsRpc('GetMcpServerStates', {});
 ```
 
-- **Automatic Credential Persistence**: When imported inside a running sidecar daemon (`ANTIGRAVITY_SIDECAR_WEB_PORT` + `ANTIGRAVITY_LS_ADDRESS`), `persistSidecarRuntime` caches `{ pid, webPort, lsAddress, csrfToken }` to `~/.gemini/antigravity/sidecar_data/<id>/data/runtime.json` so CLI tools (`setup.mjs`) invoked from external terminals can talk to the Language Server even when env vars aren't exported in the user's shell.
-- **Fallback Process Restarter (`killSidecarProcessByPortOrPid`)**: If the Language Server RPC is unreachable from an external terminal, inspects `runtime.json` PID first and falls back to parsing `listening on 127.0.0.1:<port>` from `logs/sidecar.log`, sending `SIGTERM` so Antigravity's `"restart_policy": "always"` respawns the updated sidecar immediately.
+- **Automatic Credential Persistence**: When imported inside a running sidecar daemon (`ANTIGRAVITY_SIDECAR_WEB_PORT` + `ANTIGRAVITY_LS_ADDRESS`), `persistSidecarRuntime` caches `{ pid, webPort, lsAddress, csrfToken }` to `~/.gemini/antigravity/sidecar_data/<id>/data/runtime.json` (owner-only, mode `0600` on macOS/Linux) so CLI tools (`setup.mjs`) invoked from external terminals can talk to the Language Server even when env vars aren't exported in the user's shell.
+- **Fallback Process Restarter (`killSidecarProcessByPortOrPid`)**: If the Language Server RPC is unreachable from an external terminal, sends `SIGTERM` to the sidecar so Antigravity's `"restart_policy": "always"` respawns the updated version. It only kills a process it can verify: the `runtime.json` PID must still own the recorded `webPort`, and when the port only comes from `logs/sidecar.log`, only `node` processes listening on it are stopped. A stale `runtime.json` is ignored.
 
 ---
 
@@ -154,13 +155,18 @@ await runSidecarSetup({
 });
 ```
 
+Command-line flags read from `args` (default `process.argv`): `--skip-tests`, `--uninstall`, and `--force`.
+
 What `runSidecarSetup` handles automatically:
 1. Verifies Node.js `>= 20.0.0` and all `requiredFiles`.
-2. Runs `testFiles` via `node --test` unless `--skip-tests` is passed.
-3. **Ephemeral `_npx` Copy & SDK Bundling (`resolvePermanentLinkSource`)**: When executed via `npx`, copies the package out of the temporary `_npx` cache into `~/.gemini/hangar/packages/<id>@<version>` and guarantees `node_modules/antigravity-sidecar-kit` is present inside the permanent copy whether npm nested or hoisted the dependency.
-4. Links `~/.gemini/config/sidecars/<id>` using an NTFS directory junction on Windows or symlink on macOS/Linux.
-5. Enables `sidecars[id].enabled = true` in `~/.gemini/config/config.json` (preserving `projectId`).
-6. Hot-reloads the sidecar via `ManageSidecar` RPC (`SIDECAR_ACTION_RESTART` $\rightarrow$ `SIDECAR_ACTION_ENABLE`) or `killSidecarProcessByPortOrPid` fallback.
+2. Refuses to continue if `~/.gemini/config/sidecars/<id>` is a real directory (an in-place checkout) rather than a link, unless setup is running from inside that directory or `--force` is passed. Nothing is run, copied, or deleted before this check.
+3. Runs `testFiles` via `node --test` unless `--skip-tests` is passed.
+4. **Ephemeral `_npx` Copy & SDK Bundling (`resolvePermanentLinkSource`)**: When executed via `npx`, copies the package out of the temporary `_npx` cache into `~/.gemini/hangar/packages/<id>@<version>` and guarantees `node_modules/antigravity-sidecar-kit` is present inside the permanent copy whether npm nested or hoisted the dependency. **Only `antigravity-sidecar-kit` is carried over**: sidecars installed this way must have no other runtime dependencies, and setup warns if `package.json` lists any.
+5. Links `~/.gemini/config/sidecars/<id>` using an NTFS directory junction on Windows or symlink on macOS/Linux.
+6. Enables `sidecars[id].enabled = true` in `~/.gemini/config/config.json` (preserving `projectId`, written atomically via temp file + rename).
+7. Hot-reloads the sidecar via `ManageSidecar` RPC (`SIDECAR_ACTION_RESTART` $\rightarrow$ `SIDECAR_ACTION_ENABLE`) or `killSidecarProcessByPortOrPid` fallback.
+
+`--uninstall` removes the link (never a real directory unless `--force` is passed), disables the sidecar in `config.json`, and prunes `~/.gemini/hangar/packages/<id>@*` copies left by earlier `npx` installs.
 
 ---
 
@@ -177,6 +183,7 @@ import {
 } from 'antigravity-sidecar-kit/workspace';
 
 normalizeWorkspacePath('file:///c%3A/Projects/App/'); // -> 'c:/Projects/App'
+normalizeWorkspacePath('file:///home/dev/app');       // -> '/home/dev/app'
 matchesWorkspaceRule('c:/Projects/App/packages/api', ['c:/Projects/App']); // -> true
 ```
 
@@ -187,6 +194,7 @@ matchesWorkspaceRule('c:/Projects/App/packages/api', ['c:/Projects/App']); // ->
 ```text
 antigravity-sidecar-kit/
 ├── package.json
+├── .github/workflows/test.yml  # CI: Linux, macOS, Windows × Node 20/22/24
 ├── bin/
 │   └── cli.mjs                 # CLI scaffolder (agy-sidecar-kit / create-antigravity-sidecar)
 ├── lib/
@@ -199,12 +207,26 @@ antigravity-sidecar-kit/
 │   ├── workspace.mjs           # Workspace URI normalizer, glob matcher & trajectory resolver
 │   └── scaffolder.mjs          # Project template generator
 └── test/
+    ├── cli.test.mjs
     ├── config.test.mjs
     ├── rpc.test.mjs
     ├── theme.test.mjs
     ├── setup-server.test.mjs
     └── workspace.test.mjs
 ```
+
+---
+
+## Changes in 1.0.2
+
+- `npx antigravity-sidecar-kit init <name>` now works: the package exposes a bin with its own name. The previous README commands pointed at unpublished package names.
+- Setup no longer deletes an in-place checkout at `~/.gemini/config/sidecars/<id>`; it refuses unless `--force` is passed.
+- The restart fallback no longer kills a process based on a stale `runtime.json` PID.
+- The UI token is no longer appended to protocol-relative (`//host`) URLs, and is inserted before `#fragment`s.
+- `file:///home/...` URIs normalize to absolute POSIX paths.
+- `runtime.json` is written owner-only; `config.json` writes are atomic.
+- Uninstall prunes old `npx` copies; setup warns about dependencies that the `npx` copy can't carry.
+- Scaffolded projects pass `ResponseClass: Response` and depend on the current kit version.
 
 ---
 

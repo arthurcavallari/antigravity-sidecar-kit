@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -23,6 +23,11 @@ describe('antigravity-sidecar-kit/config BOM-safe JSON helpers and config.json u
       const rawBytes = readFileSync(outPath);
       assert.notEqual(rawBytes[0], 0xef);
       assert.deepEqual(readJsonFile(outPath), { a: 1 });
+
+      // Atomic rewrite: overwrites in place and leaves no temp files behind
+      writeJsonNoBom(outPath, { a: 2, nested: { b: [1, 2] } });
+      assert.deepEqual(readJsonFile(outPath), { a: 2, nested: { b: [1, 2] } });
+      assert.deepEqual(readdirSync(join(dir, 'nested')), ['out.json']);
 
       const badPath = join(dir, 'bad.json');
       writeFileSync(badPath, '{ truncated', 'utf8');

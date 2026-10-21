@@ -1,6 +1,6 @@
 {
   "name": "antigravity-sidecar-kit",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "description": "Zero-dependency SDK and CLI scaffolder for Google Antigravity Auxiliary Pane sidecars (Connect RPC client, host theme & Tailwind proxy, BOM-safe config store, workspace URI matcher, and npx-safe installer).",
   "license": "MIT",
@@ -19,7 +19,6 @@
   "files": [
     "bin",
     "lib",
-    "test",
     "README.md",
     "LICENSE"
   ],
@@ -30,9 +29,11 @@
     "./theme": "./lib/theme.mjs",
     "./setup": "./lib/setup.mjs",
     "./server": "./lib/server.mjs",
-    "./workspace": "./lib/workspace.mjs"
+    "./workspace": "./lib/workspace.mjs",
+    "./scaffolder": "./lib/scaffolder.mjs"
   },
   "bin": {
+    "antigravity-sidecar-kit": "./bin/cli.mjs",
     "create-antigravity-sidecar": "./bin/cli.mjs",
     "agy-sidecar-kit": "./bin/cli.mjs"
   },
@@ -50,6 +51,6 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test"
   }
 }
