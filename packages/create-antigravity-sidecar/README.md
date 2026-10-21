@@ -12,3 +12,5 @@ npm run setup
 This package is a thin launcher for the CLI in
 [`antigravity-sidecar-kit`](https://github.com/arthurcavallari/antigravity-sidecar-kit),
 which has the full documentation. Options (`--dir <target-dir>`, `--force`) are passed through.
+
+Requires Node.js 20 or newer.
