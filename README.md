@@ -90,6 +90,18 @@ await manageSidecar('my-sidecar', 'SIDECAR_ACTION_RESTART');
 const customRes = await callLsRpc('GetMcpServerStates', {});
 ```
 
+- **Cached & Deduplicated Calls (`createLsRpcCache`)**: Opt-in wrapper for RPCs your UI polls. Concurrent calls with the same method and body share one in-flight request, and successful results are kept for a per-method TTL (failures are never cached). The cache lives in your sidecar's Node process, so every iframe of that sidecar shares it. Cached results are shared objects: treat them as read-only.
+
+  ```js
+  import { createLsRpcCache } from 'antigravity-sidecar-kit/rpc';
+
+  const lsCache = createLsRpcCache({
+    ttlMs: { GetUserStatus: 30_000, GetCascadeTrajectorySteps: 2_000 },
+    defaultTtlMs: 0, // unlisted methods: only merge concurrent calls
+  });
+  const status = await lsCache.call('GetUserStatus', {});
+  lsCache.invalidate('GetUserStatus'); // after a write that changes it; invalidate() clears all
+  ```
 - **Automatic Credential Persistence**: When imported inside a running sidecar daemon (`ANTIGRAVITY_SIDECAR_WEB_PORT` + `ANTIGRAVITY_LS_ADDRESS`), `persistSidecarRuntime` caches `{ pid, webPort, lsAddress, csrfToken }` to `~/.gemini/antigravity/sidecar_data/<id>/data/runtime.json` (owner-only, mode `0600` on macOS/Linux) so CLI tools (`setup.mjs`) invoked from external terminals can talk to the Language Server even when env vars aren't exported in the user's shell.
 - **Fallback Process Restarter (`killSidecarProcessByPortOrPid`)**: If the Language Server RPC is unreachable from an external terminal, sends `SIGTERM` to the sidecar so Antigravity's `"restart_policy": "always"` respawns the updated version. It only kills a process it can verify: the `runtime.json` PID must still own the recorded `webPort`, and when the port only comes from `logs/sidecar.log`, only `node` processes listening on it are stopped. A stale `runtime.json` is ignored.
 

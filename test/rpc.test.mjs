@@ -12,6 +12,7 @@ import {
   manageSidecar,
   getAllTrajectories,
   getUserStatus,
+  createLsRpcCache,
 } from '../lib/rpc.mjs';
 
 // Fakes the PowerShell / lsof / ps lookups used by findListeningPids and isNodeProcess
@@ -206,5 +207,130 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
         ),
       /LanguageServerService\/GetSidecars failed: internal failure/
     );
+  });
+
+  describe('createLsRpcCache', () => {
+    const lsOpts = { lsAddress: '127.0.0.1:50000', csrfToken: 'tok-1' };
+
+    // rpcFn whose calls stay pending until the test settles them
+    function deferredRpc() {
+      const calls = [];
+      const rpcFn = (method, body) =>
+        new Promise((resolve, reject) => calls.push({ method, body, resolve, reject }));
+      return { calls, rpcFn };
+    }
+    const flush = () => new Promise((r) => setImmediate(r));
+
+    it('merges concurrent identical calls into one request', async () => {
+      const { calls, rpcFn } = deferredRpc();
+      const cache = createLsRpcCache({ rpcFn });
+      const a = cache.call('GetCascadeTrajectorySteps', { cascadeId: 'c1' }, lsOpts);
+      const b = cache.call('GetCascadeTrajectorySteps', { cascadeId: 'c1' }, lsOpts);
+      const other = cache.call('GetCascadeTrajectorySteps', { cascadeId: 'c2' }, lsOpts);
+      await flush();
+      assert.equal(calls.length, 2);
+      calls[0].resolve({ steps: [1] });
+      calls[1].resolve({ steps: [2] });
+      assert.deepEqual(await a, { steps: [1] });
+      assert.equal(await b, await a);
+      assert.deepEqual(await other, { steps: [2] });
+
+      // Default TTL is 0: once settled, the next call goes back to the server
+      cache.call('GetCascadeTrajectorySteps', { cascadeId: 'c1' }, lsOpts);
+      await flush();
+      assert.equal(calls.length, 3);
+    });
+
+    it('caches per method TTL and keys by Language Server address', async () => {
+      let t = 1000;
+      const calls = [];
+      const cache = createLsRpcCache({
+        ttlMs: { GetUserStatus: 30_000 },
+        defaultTtlMs: 2000,
+        now: () => t,
+        rpcFn: async (method, _body, opts) => {
+          calls.push(`${opts.lsAddress}/${method}`);
+          return { n: calls.length };
+        },
+      });
+
+      assert.deepEqual(await cache.call('GetUserStatus', {}, lsOpts), { n: 1 });
+      assert.deepEqual(await cache.call('GetMcpServerStates', {}, lsOpts), { n: 2 });
+      t += 1999;
+      assert.deepEqual(await cache.call('GetUserStatus', {}, lsOpts), { n: 1 });
+      assert.deepEqual(await cache.call('GetMcpServerStates', {}, lsOpts), { n: 2 });
+      t += 1;
+      assert.deepEqual(await cache.call('GetMcpServerStates', {}, lsOpts), { n: 3 });
+      assert.deepEqual(await cache.call('GetUserStatus', {}, lsOpts), { n: 1 });
+      t += 28_000;
+      assert.deepEqual(await cache.call('GetUserStatus', {}, lsOpts), { n: 4 });
+
+      const otherLs = { lsAddress: '127.0.0.1:50001', csrfToken: 'tok-2' };
+      assert.deepEqual(await cache.call('GetUserStatus', {}, otherLs), { n: 5 });
+      assert.deepEqual(calls.slice(-1), ['127.0.0.1:50001/GetUserStatus']);
+    });
+
+    it('never caches failures', async () => {
+      let fail = true;
+      let count = 0;
+      const cache = createLsRpcCache({
+        defaultTtlMs: 60_000,
+        rpcFn: async () => {
+          count++;
+          if (fail) throw new Error('LS busy');
+          return { ok: true };
+        },
+      });
+      await assert.rejects(() => cache.call('GetUserStatus', {}, lsOpts), /LS busy/);
+      fail = false;
+      assert.deepEqual(await cache.call('GetUserStatus', {}, lsOpts), { ok: true });
+      assert.deepEqual(await cache.call('GetUserStatus', {}, lsOpts), { ok: true });
+      assert.equal(count, 2);
+    });
+
+    it('invalidate drops chosen methods, or everything, including in-flight calls', async () => {
+      const { calls, rpcFn } = deferredRpc();
+      const cache = createLsRpcCache({ defaultTtlMs: 60_000, rpcFn });
+
+      const first = cache.call('GetMcpServerStates', {}, lsOpts);
+      cache.call('GetUserStatus', {}, lsOpts);
+      await flush();
+      calls[1].resolve({ user: 1 });
+      await flush();
+
+      // Invalidated mid-flight: the late answer still reaches its caller but is not cached
+      cache.invalidate('GetMcpServerStates');
+      calls[0].resolve({ states: 'stale' });
+      assert.deepEqual(await first, { states: 'stale' });
+      const fresh = cache.call('GetMcpServerStates', {}, lsOpts);
+      await flush();
+      assert.equal(calls.length, 3);
+      calls[2].resolve({ states: 'fresh' });
+      assert.deepEqual(await fresh, { states: 'fresh' });
+
+      // Untouched methods stay cached
+      assert.deepEqual(await cache.call('GetUserStatus', {}, lsOpts), { user: 1 });
+      assert.equal(calls.length, 3);
+
+      cache.invalidate();
+      cache.call('GetUserStatus', {}, lsOpts);
+      cache.call('GetMcpServerStates', {}, lsOpts);
+      await flush();
+      assert.equal(calls.length, 5);
+    });
+
+    it('defaults to callLsRpc over HTTP', async () => {
+      let hits = 0;
+      const fetchFn = async () => {
+        hits++;
+        return { ok: true, status: 200, text: async () => '{"sidecars":[]}' };
+      };
+      const cache = createLsRpcCache({ defaultTtlMs: 60_000 });
+      const opts = { ...lsOpts, fetchFn };
+      const [a, b] = await Promise.all([cache.call('GetSidecars', {}, opts), cache.call('GetSidecars', {}, opts)]);
+      assert.deepEqual(a, { sidecars: [] });
+      assert.equal(a, b);
+      assert.equal(hits, 1);
+    });
   });
 });
