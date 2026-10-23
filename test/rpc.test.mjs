@@ -44,6 +44,21 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       const cfg = getLsConfig({ sidecarDataRoot: dir, env: {} });
       assert.equal(cfg.lsAddress, '127.0.0.1:59999');
       assert.equal(cfg.csrfToken, 'cached-token-abc');
+
+      // Non-loopback addresses and malformed tokens in runtime.json are ignored
+      writeFileSync(
+        join(dir, 'hangar', 'data', 'runtime.json'),
+        JSON.stringify({ lsAddress: 'evil.example.com:80', csrfToken: 'cached-token-abc' }),
+        'utf8'
+      );
+      assert.deepEqual(getLsConfig({ sidecarDataRoot: dir, env: {} }), { lsAddress: '', csrfToken: '' });
+
+      writeFileSync(
+        join(dir, 'hangar', 'data', 'runtime.json'),
+        JSON.stringify({ lsAddress: '127.0.0.1:59999', csrfToken: 'bad\r\ntoken' }),
+        'utf8'
+      );
+      assert.deepEqual(getLsConfig({ sidecarDataRoot: dir, env: {} }), { lsAddress: '', csrfToken: '' });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

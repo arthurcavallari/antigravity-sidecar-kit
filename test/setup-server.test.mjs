@@ -14,9 +14,17 @@ import { join } from 'node:path';
 import { readJsonSafe, writeJsonNoBom } from '../lib/config.mjs';
 import { isRealDirectory, resolvePermanentLinkSource, runSidecarSetup } from '../lib/setup.mjs';
 import { createAssetHandler, createAgyCssHandler } from '../lib/server.mjs';
-import { scaffoldSidecarProject } from '../lib/scaffolder.mjs';
+import { sanitizeSidecarName, scaffoldSidecarProject } from '../lib/scaffolder.mjs';
 
 describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
+  it('sanitizeSidecarName strips prefixes and stays fast on long runs of hyphens', () => {
+    assert.equal(sanitizeSidecarName('antigravity-sidecar-my-tool'), 'my-tool');
+    assert.equal(sanitizeSidecarName('antigravity-my-tool'), 'my-tool');
+    assert.equal(sanitizeSidecarName('agy-my_tool--'), 'my_tool');
+    const started = process.hrtime.bigint();
+    assert.equal(sanitizeSidecarName(`${'-'.repeat(200_000)}a`), 'a');
+    assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 200, 'sanitizing took too long');
+  });
   it('resolvePermanentLinkSource copies out of _npx and guarantees node_modules/antigravity-sidecar-kit in both nested and hoisted layouts', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kit-npx-test-'));
     try {

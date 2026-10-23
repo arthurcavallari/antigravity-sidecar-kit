@@ -34,6 +34,11 @@ describe('antigravity-sidecar-kit/workspace normalization and glob matching', ()
     assert.equal(matchesWorkspaceRule('/home/dev/app', ['file:///home/dev/app/']), true);
     assert.equal(matchesWorkspaceRule('/home/dev/app2', ['/home/dev/app?']), true);
     assert.equal(matchesWorkspaceRule('/home/dev/ap', ['/home/dev/app?']), false);
+
+    const started = process.hrtime.bigint();
+    assert.equal(normalizeWorkspacePath(`a${'/'.repeat(200_000)}b`), `a${'/'.repeat(200_000)}b`);
+    assert.equal(normalizeWorkspacePath(`a${'/'.repeat(200_000)}`), 'a');
+    assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 200, 'normalizing took too long');
   });
 
   it('resolves active workspace from trajectories sorted by lastUserViewTime', () => {
