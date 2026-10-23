@@ -203,6 +203,25 @@ matchesWorkspaceRule('c:/Projects/App/packages/api', ['c:/Projects/App']); // ->
 
 ---
 
+### `antigravity-sidecar-kit/lifecycle`
+Exits the sidecar once the Antigravity language server that started it is gone. On Windows, quitting Antigravity force-kills the language server, which then never stops its sidecars: they keep running as orphans, holding their ports, until they're killed by hand. Call this right after `app.run()`.
+
+```js
+import { exitWithLanguageServer } from 'antigravity-sidecar-kit/lifecycle';
+
+await app.run();
+exitWithLanguageServer({
+  app,
+  onExit: () => rmSync(SERVER_INFO_PATH, { force: true }), // optional cleanup
+});
+```
+
+Every 5 s (`intervalMs`) it opens a TCP connection to `ANTIGRAVITY_LS_ADDRESS`. After 2 failures in a row (`maxFailures`) it runs `onExit`, gives `app.close()` up to 1 s (open SSE streams would otherwise keep it waiting), then calls `process.exit(0)`. Its timer never keeps the process alive. It does nothing when `ANTIGRAVITY_LS_ADDRESS` is unset, for example when you run `server.mjs` by hand. It returns `{ active, stop() }`.
+
+This is a stopgap: remove it once Antigravity's language server stops its own sidecars on Windows.
+
+---
+
 ## 4. Repository Layout
 
 ```text
@@ -219,6 +238,7 @@ antigravity-sidecar-kit/
 │   ├── setup.mjs               # Cross-platform setup runner & _npx permanent copier
 │   ├── server.mjs              # SidecarApp asset & stylesheet route factories
 │   ├── workspace.mjs           # Workspace URI normalizer, glob matcher & trajectory resolver
+│   ├── lifecycle.mjs           # Exits an orphaned sidecar once the language server is gone
 │   └── scaffolder.mjs          # Project template generator
 ├── packages/
 │   └── create-antigravity-sidecar/   # `npm create antigravity-sidecar` launcher (published separately)
@@ -228,7 +248,8 @@ antigravity-sidecar-kit/
     ├── rpc.test.mjs
     ├── theme.test.mjs
     ├── setup-server.test.mjs
-    └── workspace.test.mjs
+    ├── workspace.test.mjs
+    └── lifecycle.test.mjs
 ```
 
 ---

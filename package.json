@@ -30,6 +30,7 @@
     "./setup": "./lib/setup.mjs",
     "./server": "./lib/server.mjs",
     "./workspace": "./lib/workspace.mjs",
+    "./lifecycle": "./lib/lifecycle.mjs",
     "./scaffolder": "./lib/scaffolder.mjs",
     "./cli": "./bin/cli.mjs"
   },
