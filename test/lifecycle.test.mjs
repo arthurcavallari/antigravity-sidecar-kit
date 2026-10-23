@@ -13,9 +13,17 @@ const listen = () =>
     server.listen(0, '127.0.0.1', () => resolve(server));
   });
 
+// The watchdog's timer is unref'd, so on Node 20/22 nothing would keep the event loop alive while
+// a test waits for it; this ref'd timer stands in for the sidecar's HTTP server.
+function keepAlive() {
+  const timer = setInterval(() => {}, 1000);
+  return () => clearInterval(timer);
+}
+
 // Runs the watchdog with a scripted probe and waits until it exits (or the test times out).
 function runWatchdog(results, extra = {}) {
   const calls = [];
+  const release = keepAlive();
   return new Promise((resolve) => {
     const handle = exitWithLanguageServer({
       address: 'localhost:52908',
@@ -25,6 +33,7 @@ function runWatchdog(results, extra = {}) {
       app: { close: () => calls.push('close') },
       exit: (code) => {
         calls.push(`exit:${code}`);
+        release();
         resolve({ calls, handle });
       },
       log: () => {},
