@@ -43,6 +43,13 @@ describe('antigravity-sidecar-kit/lifecycle', () => {
     }
   });
 
+  it('parseLsAddress stays fast on long runs of slashes (no polynomial backtracking)', () => {
+    const started = process.hrtime.bigint();
+    assert.equal(parseLsAddress('/'.repeat(200_000)), null);
+    assert.equal(parseLsAddress(`localhost:1${'/'.repeat(200_000)}`)?.port, 1);
+    assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 200, 'parsing took too long');
+  });
+
   it('probeLanguageServer is true for a listening port and false once it closes', async () => {
     const server = await listen();
     const { port } = server.address();
