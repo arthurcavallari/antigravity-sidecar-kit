@@ -41,6 +41,8 @@ describe('antigravity-sidecar-kit CLI', () => {
       const generatedServer = readFileSync(join(outDir, 'server.mjs'), 'utf8');
       assert.match(generatedServer, /import \{ SidecarApp, Response \} from 'sidecar_sdk'/);
       assert.match(generatedServer, /createAgyCssHandler\(\{ ResponseClass: Response \}\)/);
+      assert.match(generatedServer, /import \{ exitWithLanguageServer \} from 'antigravity-sidecar-kit\/lifecycle'/);
+      assert.match(generatedServer, /await app\.run\(\);\n[^\n]*\nexitWithLanguageServer\(\{ app \}\);/);
 
       const again = spawnSync(process.execPath, [CLI, 'init', 'demo', '--dir', outDir], { encoding: 'utf8' });
       assert.equal(again.status, 1, 'refuses to overwrite without --force');
