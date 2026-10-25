@@ -5,6 +5,7 @@ import {
   extractWorkspaceName,
   matchesWorkspaceRule,
   resolveActiveWorkspace,
+  isRealConversationId,
 } from '../lib/workspace.mjs';
 
 describe('antigravity-sidecar-kit/workspace normalization and glob matching', () => {
@@ -59,5 +60,82 @@ describe('antigravity-sidecar-kit/workspace normalization and glob matching', ()
     assert.equal(resolved.workspacePath, 'c:/Projects/Current');
     assert.equal(resolved.workspaceName, 'Current');
     assert.equal(resolved.conversationId, 'conv-2');
+  });
+
+  // On a switch, Antigravity stamps the previous and the next conversation with the same
+  // lastUserViewTime, so a frame's own ?conversationId= is the only reliable answer.
+  const switched = {
+    trajectorySummaries: {
+      'conv-prev': {
+        lastUserInputTime: '2026-10-24T04:27:09Z',
+        annotations: { lastUserViewTime: '2026-10-24T04:31:00Z' },
+        workspaces: [{ workspaceFolderAbsoluteUri: 'file:///c:/Projects/Prev' }],
+      },
+      'conv-open': {
+        lastUserInputTime: '2026-10-23T04:50:29Z',
+        annotations: { lastUserViewTime: '2026-10-24T04:30:00Z' },
+        workspaces: [{ workspaceFolderAbsoluteUri: 'file:///c:/Projects/Open' }],
+      },
+    },
+  };
+
+  it("returns the frame's own conversation even when another one has a newer view time", () => {
+    const resolved = resolveActiveWorkspace({
+      clientWorkspaceUris: ['file:///c:/Projects/Prev'],
+      requestedConversationId: 'conv-open',
+      trajectoriesResponse: switched,
+    });
+    assert.deepEqual(resolved, {
+      workspacePath: 'c:/Projects/Open',
+      workspaceName: 'Open',
+      source: 'conversation',
+      conversationId: 'conv-open',
+    });
+  });
+
+  it("keeps a conversation that isn't listed yet, with the pushed workspace instead of another conversation's", () => {
+    const resolved = resolveActiveWorkspace({
+      clientWorkspaceUris: ['file:///c:/Projects/Fresh'],
+      requestedConversationId: 'conv-brand-new',
+      trajectoriesResponse: switched,
+    });
+    assert.equal(resolved.conversationId, 'conv-brand-new');
+    assert.equal(resolved.workspacePath, 'c:/Projects/Fresh');
+    assert.equal(resolved.source, 'host_push');
+
+    const noPush = resolveActiveWorkspace({ requestedConversationId: 'conv-brand-new', trajectoriesResponse: switched });
+    assert.equal(noPush.conversationId, 'conv-brand-new');
+    assert.equal(noPush.workspaceName, 'Global');
+  });
+
+  it('treats _new as a new-conversation pane: no conversation, just the pushed workspace', () => {
+    assert.equal(isRealConversationId('_new'), false);
+    assert.equal(isRealConversationId(''), false);
+    assert.equal(isRealConversationId('conv-open'), true);
+
+    const resolved = resolveActiveWorkspace({
+      clientWorkspaceUris: ['file:///c:/Projects/Open'],
+      requestedConversationId: '_new',
+      trajectoriesResponse: switched,
+    });
+    assert.deepEqual(resolved, {
+      workspacePath: 'c:/Projects/Open',
+      workspaceName: 'Open',
+      source: 'new_conversation',
+      conversationId: '',
+    });
+  });
+
+  it('answers each frame independently, so windows on different conversations never affect each other', () => {
+    const ask = (id) =>
+      resolveActiveWorkspace({ requestedConversationId: id, trajectoriesResponse: switched }).conversationId;
+    assert.deepEqual(['conv-open', 'conv-prev', 'conv-open', 'conv-prev'].map(ask), [
+      'conv-open',
+      'conv-prev',
+      'conv-open',
+      'conv-prev',
+    ]);
+    // Without an id it can only guess, and the guess is the newest view time
+    assert.equal(ask(''), 'conv-prev');
   });
 });

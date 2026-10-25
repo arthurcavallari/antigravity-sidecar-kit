@@ -194,12 +194,26 @@ import {
   matchesWorkspaceRule,
   extractTrajectoryWorkspace,
   resolveActiveWorkspace,
+  isRealConversationId,
 } from 'antigravity-sidecar-kit/workspace';
 
 normalizeWorkspacePath('file:///c%3A/Projects/App/'); // -> 'c:/Projects/App'
 normalizeWorkspacePath('file:///home/dev/app');       // -> '/home/dev/app'
 matchesWorkspaceRule('c:/Projects/App/packages/api', ['c:/Projects/App']); // -> true
+
+// Pass the conversationId your frame was opened with (window.sidecar.conversationId)
+resolveActiveWorkspace({
+  requestedConversationId: window.sidecar.conversationId,
+  clientWorkspaceUris,   // from window.sidecar.onWorkspaceChange
+  trajectoriesResponse,  // from GetAllCascadeTrajectories
+}); // -> { workspacePath, workspaceName, source, conversationId }
 ```
+
+Antigravity gives each conversation its own sidecar iframe, with that conversation's id in the frame's `?conversationId=`. It never tells a frame about a switch: it shows a different frame instead. So the id your frame was opened with is its conversation, and a visible frame is the focused one. `resolveActiveWorkspace` treats it that way:
+
+- **A real id** is returned as is, with that conversation's workspace. If the conversation isn't in the trajectory list yet, you get the workspace the host pushed.
+- **`_new`** (`NEW_CONVERSATION_ID`) is the app's placeholder for a new-conversation pane. You get `conversationId: ''`, `source: 'new_conversation'` and the pushed workspace. Show an empty state rather than another conversation.
+- **No id** (a plain browser tab, a view outside any conversation) falls back to a guess: the most recently viewed conversation, preferring one in the pushed workspace. Don't try to do better from `lastUserViewTime`: on every switch the app stamps the previous and the next conversation with the same time.
 
 ---
 
