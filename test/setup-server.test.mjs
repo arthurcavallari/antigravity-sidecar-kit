@@ -13,7 +13,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonSafe, writeJsonNoBom } from '../lib/config.mjs';
 import { isRealDirectory, resolvePermanentLinkSource, runSidecarSetup } from '../lib/setup.mjs';
-import { createAssetHandler, createAgyCssHandler } from '../lib/server.mjs';
+import {
+  createAgyCssHandler,
+  createAssetHandler,
+  createShellClientHandler,
+  createShellCssHandler,
+} from '../lib/server.mjs';
 import { sanitizeSidecarName, scaffoldSidecarProject } from '../lib/scaffolder.mjs';
 
 describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
@@ -243,6 +248,19 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       const cssHandler = createAgyCssHandler({ lsAddress: '' });
       const cssRes = await cssHandler();
       assert.equal(cssRes.contentType, 'text/css; charset=utf-8');
+
+      // Conversation ID injection + AGY shell handlers
+      const convRes = handler({ conversationId: 'conv-xyz' });
+      assert.match(convRes.body, /href="\/styles\.css\?token=sec-123&v=999&conversationId=conv-xyz"/);
+
+      const shellRes = createShellCssHandler()();
+      assert.equal(shellRes.contentType, 'text/css; charset=utf-8');
+      assert.match(shellRes.body, /--agy-ink-soft/);
+      assert.match(shellRes.body, /@media \(forced-colors: active\)/);
+
+      const clientRes = createShellClientHandler()();
+      assert.equal(clientRes.contentType, 'text/javascript; charset=utf-8');
+      assert.match(clientRes.body, /agy\.theme\.v1/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
