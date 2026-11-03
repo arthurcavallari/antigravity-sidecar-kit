@@ -105,6 +105,43 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     }
   });
 
+  it('enforces readable multi-line formatting across all lib/ui CSS and shell CSS modules', () => {
+    for (const mod of ALL_AGY_UI_MODULES) {
+      const css = readModuleCss(mod);
+      const multiPropLines = css
+        .split(/\r?\n/)
+        .filter((line) => (line.match(/;/g) || []).length >= 3);
+      assert.deepEqual(
+        multiPropLines,
+        [],
+        `${mod}.css contains horizontally golfed multi-property lines`
+      );
+    }
+    const shellMultiProp = AGY_SHELL_CSS.split(/\r?\n/).filter(
+      (line) => (line.match(/;/g) || []).length >= 3
+    );
+    assert.deepEqual(
+      shellMultiProp,
+      [],
+      'shell.css contains horizontally golfed multi-property lines'
+    );
+
+    const jsBundles = [
+      ['shell-client', AGY_CLIENT_JS],
+      ...ALL_AGY_UI_MODULES.map((m) => [m, readModuleJs(m)]),
+    ];
+    for (const [name, js] of jsBundles) {
+      const commaDecls = js
+        .split(/\r?\n/)
+        .filter((l) => /^\s*(let|const)\s+[A-Za-z0-9_$]+\s*=\s*[^,;(]+,\s*[A-Za-z0-9_$]+\s*=/.test(l));
+      assert.deepEqual(commaDecls, [], `${name}.js contains comma-chained variable declarations`);
+      const multiStmtLines = js
+        .split(/\r?\n/)
+        .filter((l) => !l.includes('for (') && (l.match(/;/g) || []).length >= 3);
+      assert.deepEqual(multiStmtLines, [], `${name}.js contains packed multi-statement single lines`);
+    }
+  });
+
   it('compiles AgyUI.html tagged JSX with AST caching, XSS escaping, SVG namespace, and attribute edge cases', () => {
     const { window: win, document: doc } = parseHTML('<!DOCTYPE html><html><body></body></html>');
     const ui = attachAgyUI(win);

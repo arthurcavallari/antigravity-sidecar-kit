@@ -1,35 +1,82 @@
 /* AgyUI Module: layout */
 .agy-chrome-bar {
-  display: flex; align-items: center; gap: 2px; height: 40px; min-height: 40px;
-  padding: 0 8px 0 6px; background: var(--agy-canvas);
-  border-bottom: 1px solid var(--agy-rule); user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px 0 6px;
+  background: var(--agy-canvas);
+  border-bottom: 1px solid var(--agy-rule);
+  user-select: none;
 }
-.agy-chrome-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+.agy-chrome-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 .agy-toolbar {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 8px 12px; border-bottom: 1px solid var(--agy-rule);
-  background: var(--agy-sunken); flex-shrink: 0; flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--agy-rule);
+  background: var(--agy-sunken);
+  flex-shrink: 0;
+  flex-wrap: wrap;
 }
+
 agy-split-sash,
 .agy-split-sash {
-  position: relative; z-index: 20; height: 8px; margin: -3px 0 -4px 0;
-  flex-shrink: 0; cursor: row-resize; background: transparent;
-  touch-action: none; display: flex; align-items: center; justify-content: center;
+  position: relative;
+  z-index: 20;
+  height: 8px;
+  margin: -3px 0 -4px 0;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: transparent;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-agy-split-sash .sash-line,
-.agy-split-sash .sash-line {
-  width: 100%; height: 1px; background: var(--agy-rule);
+
+:is(agy-split-sash, .agy-split-sash) .sash-line {
+  width: 100%;
+  height: 1px;
+  background: var(--agy-rule);
   transition: height var(--agy-dur) var(--agy-ease), opacity var(--agy-dur) var(--agy-ease);
   pointer-events: none;
 }
-agy-split-sash:hover .sash-line,
-.agy-split-sash:hover .sash-line,
-body.resizing-split agy-split-sash .sash-line,
-body.resizing-split .agy-split-sash .sash-line { height: 7px; opacity: 0.5; }
+
+:is(agy-split-sash, .agy-split-sash):hover .sash-line,
+body.resizing-split :is(agy-split-sash, .agy-split-sash) .sash-line {
+  height: 7px;
+  opacity: 0.5;
+}
+
 agy-split-sash[direction="horizontal"],
 .agy-split-sash-v {
-  width: 6px; height: 100%; margin: 0 -3px; cursor: col-resize;
-  flex-shrink: 0; position: relative; z-index: 20; background: transparent; touch-action: none;
+  width: 6px;
+  height: 100%;
+  margin: 0 -3px;
+  cursor: col-resize;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+  background: transparent;
+  touch-action: none;
 }
-body.resizing-split { cursor: row-resize !important; user-select: none !important; }
-body.resizing-split iframe { pointer-events: none !important; }
+
+body.resizing-split {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+body.resizing-split iframe {
+  pointer-events: none !important;
+}
