@@ -59,7 +59,9 @@ agy-tab,
 .agy-tab:hover .agy-tab-close-wrap,
 .agy-tab:focus-visible .agy-tab-close-wrap,
 .agy-tab:has(:focus-visible) .agy-tab-close-wrap { opacity: 1; pointer-events: auto; }
-.agy-tab[data-pinned="true"] .agy-tab-close-wrap { display: none !important; }
+.agy-tab[data-pinned="true"] .agy-tab-close-wrap,
+.agy-tab.is-renaming .agy-tab-close-wrap,
+.agy-tab:has(.agy-rename-input, .agy-tab-rename-input) .agy-tab-close-wrap { display: none !important; }
 .agy-tab-close {
   display: flex; align-items: center; justify-content: center; padding: 2px;
   border-radius: 4px; color: var(--agy-ink-soft); background: transparent;

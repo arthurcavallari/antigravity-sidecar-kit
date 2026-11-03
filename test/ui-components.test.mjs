@@ -63,8 +63,11 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(addClicks, 1);
 
     // Real DOM inline rename without _replacedBy mock properties
+    assert.equal(pill1.querySelector('.agy-tab-close-wrap')?.classList.contains('hidden'), false);
     pill1.dispatchEvent(new win.Event('dblclick', { bubbles: true }));
     assert.equal(pill1._isRenaming, true);
+    assert.equal(pill1.classList.contains('is-renaming'), true);
+    assert.equal(pill1.querySelector('.agy-tab-close-wrap')?.classList.contains('hidden'), true, 'close button hidden while renaming');
     const input = pill1.querySelector('input.agy-rename-input');
     assert.ok(input, 'input.agy-rename-input mounted inside pill');
     assert.equal(pill1.querySelector('.agy-tab-label'), null, 'labelEl replaced while renaming');
@@ -84,6 +87,8 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     input.value = 'Custom Server';
     input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     assert.equal(pill1._isRenaming, false);
+    assert.equal(pill1.classList.contains('is-renaming'), false);
+    assert.equal(pill1.querySelector('.agy-tab-close-wrap')?.classList.contains('hidden'), false, 'close button restored after rename');
     assert.equal(pill1.querySelector('.agy-tab-label')?.textContent, 'Custom Server');
     assert.deepEqual(renamed, [['t1', 'Custom Server']]);
 
