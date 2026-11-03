@@ -8,10 +8,17 @@ import {
   MAX_NOTIFY_CHARS,
   MCP_CONV_META_KEY,
   StateSync,
+  extractConversationId,
+  isStandaloneAgentApiBinary,
   registerStateSyncRoutes,
   removeServerInfo,
+  runAgentApiAsync,
+  sanitizeConversationId,
+  verifySidecarToken,
   writeServerInfo,
 } from '../lib/state-sync.mjs';
+import vm from 'node:vm';
+import { AGY_CLIENT_JS } from '../lib/shell.mjs';
 
 describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine', () => {
   it('writeServerInfo and removeServerInfo atomically manage server_info.json', () => {
@@ -208,6 +215,243 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
       httpServer.closeAllConnections?.();
       await new Promise((resolve) => httpServer.close(resolve));
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('GET /api/events rejects unauthenticated SSE requests when ANTIGRAVITY_SIDECAR_UI_TOKEN is set and blocks non-loopback Origin', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-sse-auth-'));
+    const prevToken = process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+    process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = 'secret-token-123';
+
+    const fakeApp = {
+      api() {},
+      async run() {
+        const srv = createServer((_req, res) => res.writeHead(404).end());
+        await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
+        return srv;
+      },
+    };
+
+    const sync = registerStateSyncRoutes(fakeApp, {
+      sidecarId: 'sse-auth-test',
+      dataRoot: dir,
+      initialState: () => ({ ok: true }),
+    });
+    const httpServer = await fakeApp.run();
+    try {
+      const { port } = httpServer.address();
+      const resNoToken = await fetch(`http://127.0.0.1:${port}/api/events`);
+      assert.equal(resNoToken.status, 401);
+
+      const resShortToken = await fetch(`http://127.0.0.1:${port}/api/events?token=short`);
+      assert.equal(resShortToken.status, 401);
+
+      const resBadOrigin = await fetch(`http://127.0.0.1:${port}/api/events?token=secret-token-123`, {
+        headers: { Origin: 'https://evil.example.com' },
+      });
+      assert.equal(resBadOrigin.status, 403);
+
+      const ac = new AbortController();
+      const resValid = await fetch(`http://127.0.0.1:${port}/api/events?token=secret-token-123`, {
+        headers: { Origin: `http://127.0.0.1:${port}` },
+        signal: ac.signal,
+      });
+      assert.equal(resValid.status, 200);
+      ac.abort();
+
+      assert.equal(verifySidecarToken('secret-token-123', 'secret-token-123'), true);
+      assert.equal(verifySidecarToken('short', 'secret-token-123'), false);
+    } finally {
+      if (prevToken === undefined) delete process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+      else process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = prevToken;
+      sync.dispose();
+      httpServer.closeAllConnections?.();
+      await new Promise((resolve) => httpServer.close(resolve));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('sanitizeConversationId rejects literal "null" and "undefined" and extractConversationId reads x-sidecar-conversation header', () => {
+    assert.equal(sanitizeConversationId('null'), null);
+    assert.equal(sanitizeConversationId('undefined'), null);
+    assert.equal(sanitizeConversationId('_new'), null);
+    assert.equal(sanitizeConversationId('none'), null);
+    assert.equal(sanitizeConversationId('a..b'), null);
+    assert.equal(
+      extractConversationId({ req: { headers: { 'x-sidecar-conversation': 'conv-abc-123' } } }),
+      'conv-abc-123'
+    );
+  });
+
+  it('isStandaloneAgentApiBinary distinguishes agentapi(.exe) from agy/antigravity wrapper and handleNotify falls back to start-conversation', async () => {
+    assert.equal(isStandaloneAgentApiBinary('C:\\Users\\arthu\\bin\\agentapi.exe'), true);
+    assert.equal(isStandaloneAgentApiBinary('/usr/local/bin/agentapi'), true);
+    assert.equal(isStandaloneAgentApiBinary('C:\\Program Files\\Antigravity\\agy.exe'), false);
+
+    const execCalls = [];
+    await runAgentApiAsync(['send-message', 'conv-1', 'hello'], {
+      exePath: 'C:\\Users\\arthu\\bin\\agentapi.exe',
+      execFileFn: (file, args, _opts, cb) => {
+        execCalls.push({ file, args });
+        cb(null, '{"ok":true}');
+      },
+    });
+    assert.deepEqual(execCalls[0], {
+      file: 'C:\\Users\\arthu\\bin\\agentapi.exe',
+      args: ['send-message', 'conv-1', 'hello'],
+    });
+
+    const fallbackCalls = [];
+    const sync = new StateSync({
+      sidecarId: 'fallback-sync',
+      agentApiFn: async (args) => {
+        fallbackCalls.push(args);
+        if (args[0] === 'send-message') return { error: 'Cascade expired' };
+        return { ok: true };
+      },
+    });
+    try {
+      const resNew = await sync.handleNotify({
+        conversationId: '_new',
+        workspace: '/tmp/ws',
+        message: 'Start fresh',
+      });
+      assert.equal(resNew.ok, true);
+      assert.deepEqual(fallbackCalls[0], ['start-conversation', '--workspace', '/tmp/ws', 'Start fresh']);
+
+      const resExpired = await sync.handleNotify({
+        conversationId: 'conv-expired',
+        workspace: '/tmp/ws',
+        message: 'Recover expired',
+      });
+      assert.equal(resExpired.ok, true);
+      assert.deepEqual(fallbackCalls.at(-1), ['start-conversation', '--workspace', '/tmp/ws', 'Recover expired']);
+    } finally {
+      sync.dispose();
+    }
+  });
+
+  it('subscribeStateSyncEvents listens to named state and state_changed SSE events', async () => {
+    const listeners = new Map();
+    let instance = null;
+    class FakeEventSource {
+      constructor(url) {
+        this.url = url;
+        instance = this;
+      }
+      addEventListener(type, fn) {
+        listeners.set(type, fn);
+      }
+      close() {}
+    }
+    const sandbox = {
+      EventSource: FakeEventSource,
+      URL,
+      URLSearchParams,
+      setTimeout: (fn) => {
+        fn();
+        return 1;
+      },
+      window: {
+        location: { href: 'http://127.0.0.1:5000/?token=t1', search: '?token=t1' },
+        matchMedia: () => ({ matches: true }),
+      },
+      document: { readyState: 'complete', documentElement: { dataset: {}, style: {} } },
+    };
+    sandbox.window.document = sandbox.document;
+    vm.runInNewContext(AGY_CLIENT_JS, sandbox);
+
+    const received = [];
+    const sub = sandbox.window.AgyShell.subscribeStateSyncEvents({
+      conversationId: 'conv-abc',
+      onStateEvent: (state, version) => received.push({ state, version }),
+    });
+    assert.equal(typeof listeners.get('state'), 'function');
+    assert.equal(typeof listeners.get('state_changed'), 'function');
+    assert.equal(new URL(instance.url).searchParams.get('conversationId'), 'conv-abc');
+    assert.equal(new URL(instance.url).searchParams.get('conversation'), 'conv-abc');
+    listeners.get('state')({ data: JSON.stringify({ state: { ready: true }, version: 3 }) });
+    assert.deepEqual(JSON.parse(JSON.stringify(received)), [{ state: { ready: true }, version: 3 }]);
+    sub.close();
+  });
+
+  it('isolates handleNotify deduplication per conversation, honors explicit _new, and enforces auth on mutate/notify/mcp (F-02, F-09)', async () => {
+    const sent = [];
+    const sync = new StateSync({
+      sidecarId: 'dedup-sync',
+      app: { config: { conversationId: 'stale-conv-999', workspace: '/app/ws' } },
+      notifyAgent: async (msg, meta) => {
+        sent.push({ msg, meta });
+        return { ok: true };
+      },
+    });
+    try {
+      const r1 = await sync.handleNotify({ conversationId: 'conv-a', message: 'Same alert' });
+      const r2 = await sync.handleNotify({ conversationId: 'conv-b', message: 'Same alert' });
+      assert.equal(r1.deduplicated, false);
+      assert.equal(r2.deduplicated, false);
+      assert.equal(sent.length, 2);
+
+      // Explicit _new must not fall back to stale app.config.conversationId ('stale-conv-999')
+      const rNew = await sync.handleNotify({ conversationId: '_new', message: 'Fresh start' });
+      assert.equal(rNew.ok, true);
+      assert.equal(sent[2].meta.conversationId, '');
+      assert.equal(sent[2].meta.workspace, '/app/ws');
+
+      // Origin and token enforcement on handleMutate, handleNotify, and handleMcp
+      const prevTok = process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+      process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = 'tok-sec';
+      try {
+        const badOriginMut = sync.handleMutate({ x: 1 }, { req: { headers: { origin: 'https://evil.example' } } });
+        assert.equal(badOriginMut.ok, false);
+        const unauthMut = sync.handleMutate({ x: 1 }, { req: { headers: { origin: 'http://127.0.0.1:8000' } } });
+        assert.equal(unauthMut.ok, false);
+        const authMut = sync.handleMutate({ x: 1 }, { req: { headers: { origin: 'http://127.0.0.1:8000', 'x-sidecar-token': 'tok-sec' } } });
+        assert.equal(authMut.ok, true);
+
+        // ASK-01: Headerless ctx ({} or omitted) must still enforce ANTIGRAVITY_SIDECAR_UI_TOKEN
+        const headerlessMut = sync.handleMutate({ x: 2 }, {});
+        assert.equal(headerlessMut.ok, false);
+        assert.equal(headerlessMut.status, 401);
+        const headerlessNotify = await sync.handleNotify({ conversationId: 'conv-a', message: 'unauth' }, {});
+        assert.equal(headerlessNotify.ok, false);
+        assert.equal(headerlessNotify.status, 401);
+        const headerlessMcp = await sync.handleMcp({ jsonrpc: '2.0', id: 9, method: 'tools/list' }, {});
+        assert.equal(headerlessMcp.status, 401);
+        assert.ok(headerlessMcp.error);
+
+        // Valid token via query or data.token succeeds even when headers are absent
+        const queryTokMut = sync.handleMutate({ x: 3 }, { query: { token: 'tok-sec' } });
+        assert.equal(queryTokMut.ok, true);
+      } finally {
+        if (prevTok === undefined) delete process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+        else process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = prevTok;
+      }
+    } finally {
+      sync.dispose();
+    }
+  });
+
+  it('ASK-03: per-conversation StateSync persists to brainDir even when dataDir is empty, honors stateFilename, and sanitizes sidecarId', () => {
+    const tmpBrain = mkdtempSync(join(tmpdir(), 'kit-brain-ask03-'));
+    const convUuid = '11111111-2222-3333-4444-555555555555';
+    const sync = new StateSync({
+      sidecarId: '../my-sidecar',
+      perConversation: true,
+      brainDir: tmpBrain,
+      stateFilename: 'custom-state.json',
+    });
+    try {
+      const res = sync.handleMutate({ conversationId: convUuid, count: 42 });
+      assert.equal(res.ok, true);
+      const scratchPath = join(tmpBrain, convUuid, 'scratch', 'sidecars', sync.sidecarId, 'custom-state.json');
+      const dotPath = join(tmpBrain, convUuid, '.sidecar-state', `${sync.sidecarId}.json`);
+      assert.equal(existsSync(scratchPath), true, 'must persist to scratch/sidecars/<sidecarId>/<stateFilename>');
+      assert.equal(existsSync(dotPath), true, 'must also persist to .sidecar-state/<sidecarId>.json');
+      assert.equal(sync.sidecarId.includes('..'), false, 'sidecarId must be sanitized against traversal');
+    } finally {
+      sync.dispose();
+      rmSync(tmpBrain, { recursive: true, force: true });
     }
   });
 });

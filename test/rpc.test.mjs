@@ -98,6 +98,21 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       });
       assert.deepEqual(live, { restarted: true, method: 'pid:4242' });
       assert.deepEqual(killed, [{ pid: 4242, sig: 'SIGTERM' }]);
+
+      // ASK-08: Stale/recycled non-Node launcherPid must NOT be killed when runtimePid is restarted
+      writeFileSync(
+        join(dataDir, 'runtime.json'),
+        JSON.stringify({ pid: 4242, launcherPid: 9999, webPort: 51234 }),
+        'utf8'
+      );
+      const killedWithLauncher = [];
+      killSidecarProcessByPortOrPid('demo-sc', {
+        sidecarDataRoot: dir,
+        execFn: fakeExec({ owners: { 51234: [4242] }, names: { 9999: 'explorer', 4242: 'node' } }),
+        killFn: (pid) => killedWithLauncher.push(pid),
+        platform: 'linux',
+      });
+      assert.deepEqual(killedWithLauncher, [4242], 'must not kill non-Node recycled launcherPid 9999');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -347,5 +362,34 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       assert.equal(a, b);
       assert.equal(hits, 1);
     });
+  });
+
+  it('exposes createSingleFlightPoller and extractCsrfToken (F-08, F-10, XREPO-02)', async () => {
+    const rpcMod = await import('../lib/rpc.mjs');
+    assert.equal(typeof rpcMod.createSingleFlightPoller, 'function');
+    assert.equal(typeof rpcMod.extractCsrfToken, 'function');
+    assert.equal(rpcMod.extractCsrfToken('--csrf_token="abc.def/123+456="'), 'abc.def/123+456=');
+    assert.equal(rpcMod.extractCsrfToken("--csrf-token 'tok_99.1'"), 'tok_99.1');
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let errors = 0;
+    let runs = 0;
+    const poller = rpcMod.createSingleFlightPoller(
+      async () => {
+        runs++;
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 25));
+        inFlight--;
+        if (runs === 1) throw new Error('boom');
+      },
+      { intervalMs: 20, onError: () => { errors++; } }
+    );
+    poller.start();
+    await Promise.all([poller.trigger(), poller.trigger()]);
+    poller.stop();
+    assert.equal(maxInFlight, 1);
+    assert.equal(errors, 1);
   });
 });

@@ -525,4 +525,179 @@ describe('antigravity-sidecar-kit/ui (AgyUI modular component library)', () => {
     closedItem.emit('click', {});
     assert.equal(reopenedId, 'closed-1');
   });
+
+  it('exposes createVisibilityPoller in AGY_CLIENT_JS combining sidecar-visibility message, IntersectionObserver, and document.hidden', async () => {
+    const clientJs = createShellClientHandler()().body;
+    assert.ok(clientJs.includes('createVisibilityPoller'));
+
+    const winListeners = {};
+    const docListeners = {};
+    let ioCallback = null;
+    let observedTarget = null;
+
+    const doc = {
+      hidden: false,
+      documentElement: makeDomNode('html'),
+      addEventListener(ev, fn) {
+        (docListeners[ev] = docListeners[ev] || []).push(fn);
+      },
+    };
+    const win = {
+      parent: null,
+      addEventListener(ev, fn) {
+        (winListeners[ev] = winListeners[ev] || []).push(fn);
+      },
+    };
+    win.parent = win;
+
+    class MockIntersectionObserver {
+      constructor(cb) {
+        ioCallback = cb;
+      }
+      observe(target) {
+        observedTarget = target;
+      }
+    }
+
+    const timers = new Map();
+    let nextTimerId = 1;
+    const ctx = vm.createContext({
+      window: win,
+      document: doc,
+      IntersectionObserver: MockIntersectionObserver,
+      setTimeout(fn, ms) {
+        const id = nextTimerId++;
+        timers.set(id, { fn, ms });
+        return id;
+      },
+      clearTimeout(id) {
+        timers.delete(id);
+      },
+    });
+    vm.runInContext(clientJs, ctx);
+
+    assert.equal(typeof win.AgyShell?.createVisibilityPoller, 'function');
+    let pollCount = 0;
+    const poller = win.AgyShell.createVisibilityPoller({
+      onPoll: () => {
+        pollCount++;
+      },
+      intervalMs: 2500,
+    });
+
+    assert.equal(observedTarget, doc.documentElement);
+    assert.equal(poller.isVisible(), true);
+
+    poller.start();
+    assert.equal(pollCount, 1, 'starts immediate poll when visible');
+    assert.equal(timers.size, 1);
+
+    // Hide via postMessage('sidecar-visibility')
+    for (const fn of winListeners.message || []) {
+      fn({ source: win.parent, data: { type: 'sidecar-visibility', payload: { visible: false } } });
+    }
+    assert.equal(poller.isVisible(), false);
+    assert.equal(timers.size, 0, 'timer cleared when hidden by host');
+
+    // Restore via postMessage('sidecar-visibility')
+    for (const fn of winListeners.message || []) {
+      fn({ source: win.parent, data: { type: 'sidecar-visibility', payload: { visible: true } } });
+    }
+    assert.equal(poller.isVisible(), true);
+    assert.equal(pollCount, 2, 'polls immediately on becoming visible');
+
+    // Hide via IntersectionObserver
+    ioCallback([{ isIntersecting: false }]);
+    assert.equal(poller.isVisible(), false);
+    assert.equal(timers.size, 0);
+
+    // Restore via IntersectionObserver
+    ioCallback([{ isIntersecting: true }]);
+    assert.equal(poller.isVisible(), true);
+    assert.equal(pollCount, 3);
+
+    // Hide via document.hidden + visibilitychange
+    doc.hidden = true;
+    for (const fn of docListeners.visibilitychange || []) fn();
+    assert.equal(poller.isVisible(), false);
+    assert.equal(timers.size, 0);
+
+    // Restore via document.hidden + visibilitychange
+    doc.hidden = false;
+    for (const fn of docListeners.visibilitychange || []) fn();
+    assert.equal(poller.isVisible(), true);
+    assert.equal(pollCount, 4);
+
+    // triggerNow and stop
+    poller.triggerNow();
+    assert.equal(pollCount, 5);
+
+    // Single-flight async guard: overlapping triggerNow calls must not run onPoll concurrently (F-04)
+    let resolveAsyncPoll = null;
+    let asyncPollCalls = 0;
+    const asyncPoller = win.AgyShell.createVisibilityPoller({
+      onPoll: () => {
+        asyncPollCalls++;
+        return new Promise((r) => {
+          resolveAsyncPoll = r;
+        });
+      },
+      intervalMs: 2500,
+    });
+    asyncPoller.start();
+    assert.equal(asyncPollCalls, 1);
+    asyncPoller.triggerNow();
+    assert.equal(asyncPollCalls, 1, 'must not overlap in-flight async poll');
+    resolveAsyncPoll();
+    asyncPoller.stop();
+
+    poller.stop();
+    assert.equal(timers.size, 0);
+
+    // ASK-02 & hiddenPollMs: verify notifyAgent and AgyUI.apiCall attach X-Sidecar-Token in direct webPort iframe mode
+    const capturedRequests = [];
+    const iframeWin = {
+      location: { href: 'http://127.0.0.1:52000/?token=direct-tok-777&conversationId=conv-9', search: '?token=direct-tok-777&conversationId=conv-9' },
+      fetch: async (url, init) => {
+        capturedRequests.push({ url, init });
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    const iframeDoc = {
+      hidden: false,
+      readyState: 'complete',
+      documentElement: makeDomNode('html'),
+      createElement: (t) => makeDomNode(t),
+      body: makeDomNode('body'),
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    iframeWin.document = iframeDoc;
+    vm.runInNewContext(clientJs, { window: iframeWin, document: iframeDoc, fetch: iframeWin.fetch, URLSearchParams, URL, setTimeout, clearTimeout });
+    await iframeWin.AgyShell.notifyAgent('hello from direct iframe');
+    assert.equal(capturedRequests.length, 1);
+    assert.equal(capturedRequests[0].init.headers['X-Sidecar-Token'], 'direct-tok-777');
+
+    const iframeUi = attachAgyUI({ window: iframeWin, document: iframeDoc });
+    await iframeUi.apiCall('/api/mutate', { a: 1 });
+    assert.equal(capturedRequests.length, 2);
+    assert.equal(capturedRequests[1].init.headers['X-Sidecar-Token'], 'direct-tok-777');
+
+    // Verify hiddenPollMs schedules slow background polling when hidden
+    let hiddenTicks = 0;
+    const bgPoller = win.AgyShell.createVisibilityPoller({
+      onPoll: () => { hiddenTicks++; },
+      intervalMs: 1000,
+      hiddenPollMs: 10000,
+    });
+    doc.hidden = true;
+    bgPoller.start();
+    assert.equal(timers.size, 1, 'hiddenPollMs schedules timer even when hidden');
+    const scheduledDelay = [...timers.values()][0].ms;
+    assert.equal(scheduledDelay, 10000);
+    bgPoller.stop();
+  });
 });
+

@@ -2,11 +2,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -261,6 +263,136 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       const clientRes = createShellClientHandler()();
       assert.equal(clientRes.contentType, 'text/javascript; charset=utf-8');
       assert.match(clientRes.body, /agy\.theme\.v1/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('createAssetHandler blocks symlink escapes, hardlinks, and traversal outside uiDir', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-asset-sec-'));
+    try {
+      const uiDir = join(dir, 'ui');
+      mkdirSync(uiDir, { recursive: true });
+      const outsidePath = join(dir, 'outside.js');
+      writeFileSync(outsidePath, 'secret()', 'utf8');
+      writeFileSync(join(uiDir, 'ok.js'), 'ok()', 'utf8');
+
+      const handlers = createAssetHandler(uiDir, {
+        '/escape.js': ['../outside.js', 'text/javascript'],
+        '/ok.js': ['ok.js', 'text/javascript'],
+      });
+      const resEscape = handlers['/escape.js']();
+      assert.equal(resEscape.status, 403);
+
+      const resOk = handlers['/ok.js']();
+      assert.equal(resOk.status, 200);
+
+      // Hardlink check (nlink > 1)
+      const hardlinkPath = join(uiDir, 'hardlink.js');
+      linkSync(outsidePath, hardlinkPath);
+      const hardlinkHandler = createAssetHandler(uiDir, 'hardlink.js', 'text/javascript');
+      assert.equal(hardlinkHandler().status, 403);
+
+      // Symlink check (when OS allows creating file symlinks)
+      const symlinkPath = join(uiDir, 'symlink.js');
+      let symlinkCreated = false;
+      try {
+        symlinkSync(outsidePath, symlinkPath);
+        symlinkCreated = true;
+      } catch {
+        // Unprivileged Windows without Developer Mode may disallow file symlinks
+      }
+      if (symlinkCreated) {
+        const symlinkHandler = createAssetHandler(uiDir, 'symlink.js', 'text/javascript');
+        assert.equal(symlinkHandler().status, 403);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('setupSidecarServer wires asset routes, shell/ui routes, StateSync, and forwards server options (F-08, XREPO-02)', async () => {
+    const srvMod = await import('../lib/server.mjs');
+    assert.equal(typeof srvMod.setupSidecarServer, 'function');
+    const dir = mkdtempSync(join(tmpdir(), 'kit-turnkey-'));
+    try {
+      writeFileSync(join(dir, 'index.html'), '<html><body>ok</body></html>', 'utf8');
+      const pages = new Map();
+      const apis = new Map();
+      const fakeApp = {
+        page(p, h) { pages.set(p, h); },
+        api(p, h) { apis.set(p, h); },
+      };
+      const { app, sync } = srvMod.setupSidecarServer(fakeApp, {
+        uiDir: dir,
+        corsOrigins: ['http://127.0.0.1'],
+        host: '127.0.0.1',
+        bodyLimitBytes: 65536,
+        stateSyncOptions: { sidecarId: 'turnkey-test', dataRoot: dir },
+      });
+      assert.equal(app, fakeApp);
+      assert.deepEqual(app.corsOrigins, ['http://127.0.0.1']);
+      assert.equal(app.host, '127.0.0.1');
+      assert.equal(app.bodyLimitBytes, 65536);
+      assert.equal(pages.has('/'), true);
+      assert.equal(pages.has('/ui.html'), true);
+      assert.equal(pages.has('/agy.css'), true);
+      assert.equal(pages.has('/shell.css'), true);
+      assert.equal(pages.has('/shell.js'), true);
+      assert.equal(pages.has('/ui.css'), true);
+      assert.equal(pages.has('/ui.js'), true);
+      assert.equal(apis.has('/api/events'), true);
+      assert.equal(apis.has('/api/mutate'), true);
+      sync?.dispose?.();
+
+      // ASK-06: enableUiRoutes: false, uiModules, and enableStateSync: true/false forwarding
+      const pages2 = new Map();
+      const apis2 = new Map();
+      const fakeApp2 = {
+        page(p, h) { pages2.set(p, h); },
+        api(p, h) { apis2.set(p, h); },
+      };
+      const res2 = srvMod.setupSidecarServer(fakeApp2, {
+        uiDir: dir,
+        enableUiRoutes: false,
+        enableStateSync: true,
+        stateSyncOptions: { sidecarId: 'turnkey-2', dataRoot: dir },
+      });
+      assert.equal(pages2.has('/ui.css'), false, 'enableUiRoutes: false must skip /ui.css');
+      assert.equal(apis2.has('/api/mutate'), true, 'enableStateSync: true must register /api/mutate');
+      res2.sync?.dispose?.();
+
+      const pages3 = new Map();
+      const apis3 = new Map();
+      const fakeApp3 = {
+        page(p, h) { pages3.set(p, h); },
+        api(p, h) { apis3.set(p, h); },
+      };
+      srvMod.setupSidecarServer(fakeApp3, {
+        uiDir: dir,
+        uiModules: ['controls'],
+        enableStateSync: false,
+        stateSyncOptions: { sidecarId: 'turnkey-3', dataRoot: dir },
+      });
+      assert.equal(pages3.has('/ui.css'), true);
+      const controlsOnlyCss = pages3.get('/ui.css')().body;
+      assert.equal(controlsOnlyCss.includes('.agy-btn'), true);
+      assert.equal(controlsOnlyCss.includes('.agy-tab-strip'), false, 'uiModules subset must be respected');
+      assert.equal(apis3.has('/api/mutate'), false, 'enableStateSync: false must skip StateSync routes');
+
+      // ASK-12: createAssetHandler injects token into single-quoted src/href and URLs with existing query strings
+      writeFileSync(
+        join(dir, 'quotes.html'),
+        `<html><head><link rel="stylesheet" href="/agy.css?v=1"><script src='/shell.js#init'></script></head></html>`,
+        'utf8'
+      );
+      const quoteHandler = srvMod.createAssetHandler(dir, 'quotes.html', 'text/html', {
+        uiToken: 'tok-q12',
+        bootTs: 99,
+      });
+      const renderedHtml = quoteHandler().body;
+      assert.match(renderedHtml, /href="\/agy\.css\?v=1&token=tok-q12&v=99"/);
+      assert.match(renderedHtml, /src='\/shell\.js\?token=tok-q12&v=99#init'/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

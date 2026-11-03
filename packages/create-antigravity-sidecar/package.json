@@ -26,7 +26,7 @@
     "create-antigravity-sidecar": "bin/cli.mjs"
   },
   "dependencies": {
-    "antigravity-sidecar-kit": "^1.0.3"
+    "antigravity-sidecar-kit": "^1.4.0"
   },
   "keywords": [
     "create",

@@ -36,6 +36,11 @@
     "./state-sync": "./lib/state-sync.mjs",
     "./shell": "./lib/shell.mjs",
     "./ui": "./lib/ui.mjs",
+    "./validator": "./lib/manifest-validator.mjs",
+    "./manifest-validator": "./lib/manifest-validator.mjs",
+    "./hooks": "./lib/hooks.mjs",
+    "./skill-router": "./lib/skill-router.mjs",
+    "./binary-stream": "./lib/binary-stream.mjs",
     "./cli": "./bin/cli.mjs"
   },
   "bin": {
