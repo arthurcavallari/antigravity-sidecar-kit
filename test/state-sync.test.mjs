@@ -423,6 +423,14 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
         // Valid token via query or data.token succeeds even when headers are absent
         const queryTokMut = sync.handleMutate({ x: 3 }, { query: { token: 'tok-sec' } });
         assert.equal(queryTokMut.ok, true);
+
+        // When SidecarApp calls app.api handler with 1 argument (ctx === undefined) inside activeRequestStore
+        const { runWithRequestContext } = await import('../lib/state-sync.mjs');
+        const asyncStoreMut = runWithRequestContext(
+          { headers: { origin: 'http://127.0.0.1:8000', 'x-sidecar-token': 'tok-sec' }, query: { token: 'tok-sec' } },
+          () => sync.handleMutate({ x: 4 })
+        );
+        assert.equal(asyncStoreMut.ok, true);
       } finally {
         if (prevTok === undefined) delete process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
         else process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = prevTok;
