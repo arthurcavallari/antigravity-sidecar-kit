@@ -1,0 +1,143 @@
+/* AgyUI Module: tabs */
+agy-tab-strip,
+.agy-tab-strip {
+  display: flex; align-items: center; gap: 1px; flex: 1 1 0%; min-width: 0;
+  padding: 4px 0; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: none;
+}
+agy-tab-strip::-webkit-scrollbar,
+.agy-tab-strip::-webkit-scrollbar { display: none; }
+.agy-tab-strip.mask-left { mask-image: linear-gradient(to right, transparent 0px, black 38px); -webkit-mask-image: linear-gradient(to right, transparent 0px, black 38px); }
+.agy-tab-strip.mask-right { mask-image: linear-gradient(to left, transparent 0px, black 38px); -webkit-mask-image: linear-gradient(to left, transparent 0px, black 38px); }
+.agy-tab-strip.mask-both {
+  mask-image: linear-gradient(to right, transparent 0px, black 38px, black calc(100% - 38px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0px, black 38px, black calc(100% - 38px), transparent 100%);
+}
+.agy-tab-strip.drop-target { background: color-mix(in srgb, var(--agy-accent) 16%, transparent); outline: 1px dashed var(--agy-accent); }
+.agy-tab-strip-sm { height: 32px; padding: 2px 0; gap: 1px; border-radius: var(--radius-md, 0.375rem); }
+agy-tab,
+.agy-tab {
+  position: relative; display: inline-flex; align-items: center; gap: 4px;
+  height: 28px; overflow: hidden; padding: 4px 8px 4px 6px;
+  border-radius: var(--radius-lg, 0.5rem); border: none; outline: none;
+  background: transparent; color: var(--agy-ink-soft); font-family: inherit;
+  font-size: var(--text-sm, 0.875rem); line-height: 1.25rem;
+  font-weight: var(--font-weight-normal, 400); cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+  transition: background-color var(--agy-dur) var(--agy-ease), color var(--agy-dur) var(--agy-ease), transform 150ms ease;
+}
+.agy-tab:hover { background: var(--agy-hover); color: var(--agy-ink); }
+.agy-tab.active { background: var(--agy-control); color: var(--agy-ink); }
+.agy-tab-icon {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; flex-shrink: 0;
+}
+.agy-tab-label { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agy-tab-badge { opacity: 0.78; font-size: var(--text-sm, 0.875rem); line-height: 1.25rem; flex-shrink: 0; }
+.agy-tab-ext-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 3px;
+  color: #60a5fa; background: rgba(59, 130, 246, 0.12); flex-shrink: 0;
+}
+.agy-tab-pin {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; margin-left: 2px; border-radius: 4px;
+  color: var(--agy-ink-soft); background: transparent; border: none; padding: 0;
+  outline: none; cursor: pointer; flex-shrink: 0;
+  transition: background-color var(--agy-dur) var(--agy-ease), color var(--agy-dur) var(--agy-ease);
+}
+.agy-tab-pin:hover { color: var(--agy-ink); background: var(--agy-rule); }
+.agy-tab-close-wrap {
+  position: absolute; top: 0; bottom: 0; right: 0; z-index: 10;
+  display: flex; align-items: center; padding-left: 16px; padding-right: 6px;
+  border-top-right-radius: var(--radius-lg, 0.5rem); border-bottom-right-radius: var(--radius-lg, 0.5rem);
+  background: linear-gradient(to right, transparent 0%, var(--agy-hover) 25%);
+  opacity: 0; pointer-events: none; transition: opacity var(--agy-dur) var(--agy-ease);
+}
+.agy-tab.active .agy-tab-close-wrap {
+  background: linear-gradient(to right, transparent 0%, var(--agy-control) 25%);
+}
+.agy-tab:hover .agy-tab-close-wrap,
+.agy-tab:focus-visible .agy-tab-close-wrap,
+.agy-tab:has(:focus-visible) .agy-tab-close-wrap { opacity: 1; pointer-events: auto; }
+.agy-tab[data-pinned="true"] .agy-tab-close-wrap { display: none !important; }
+.agy-tab-close {
+  display: flex; align-items: center; justify-content: center; padding: 2px;
+  border-radius: 4px; color: var(--agy-ink-soft); background: transparent;
+  border: none; outline: none; cursor: pointer; flex-shrink: 0;
+  transition: background-color var(--agy-dur) var(--agy-ease), color var(--agy-dur) var(--agy-ease);
+}
+.agy-tab-close:hover { color: var(--agy-ink); background: var(--agy-rule); }
+.agy-tab-add,
+.agy-tab-add-btn { margin-left: 2px; flex-shrink: 0; }
+.agy-tab-drop-hint { font-size: var(--text-xs, 0.75rem); color: var(--agy-ink-soft); padding: 0 8px; user-select: none; }
+.agy-tab-rename-input,
+.agy-rename-input {
+  width: 100px; height: 20px; padding: 0 5px; border-radius: 4px;
+  border: 1px solid var(--agy-accent); background: var(--agy-canvas);
+  color: var(--agy-ink); font-family: inherit; font-size: 12px; outline: none;
+}
+.agy-tab-overflow-wrap { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; }
+.agy-tab-overflow-btn { margin-left: 2px; flex-shrink: 0; }
+.agy-tab-overflow-btn.has-hidden-tabs {
+  width: auto; padding: 0 6px; gap: 3px;
+  background: color-mix(in srgb, var(--agy-control) 55%, transparent); color: var(--agy-ink-soft);
+}
+.agy-tab-overflow-btn.has-hidden-tabs:hover { background: var(--agy-control); color: var(--agy-ink); }
+.agy-tab-overflow-badge { font-size: 11px; line-height: 1; font-weight: 500; font-variant-numeric: tabular-nums; }
+.agy-tab-overflow-popover {
+  position: fixed; inset: auto; padding: 4px; border-radius: var(--radius-lg, 0.5rem);
+  border: 1px solid var(--agy-rule); background: var(--agy-card); color: var(--agy-ink);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  width: 220px; max-height: 20rem; overflow-y: auto; user-select: none; z-index: 2600;
+}
+.agy-tab-overflow-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 6px 8px; border-radius: var(--radius-md, 0.375rem);
+  border: none; outline: none; background: transparent; color: var(--agy-ink-soft);
+  font-family: inherit; font-size: var(--text-xs, 0.75rem); line-height: 1rem;
+  cursor: pointer; text-align: left;
+  transition: background-color var(--agy-dur) var(--agy-ease), color var(--agy-dur) var(--agy-ease), opacity var(--agy-dur) var(--agy-ease);
+}
+.agy-tab-overflow-item:hover { background: var(--agy-hover); color: var(--agy-ink); }
+.agy-tab-overflow-item.active { background: var(--agy-control); color: var(--agy-ink); font-weight: var(--font-weight-medium, 500); }
+.agy-tab-overflow-item.is-hidden-tab { opacity: 0.78; }
+.agy-tab-overflow-item.is-hidden-tab:hover { opacity: 1; }
+.agy-tab-overflow-restore {
+  font-size: 10px; line-height: 14px; padding: 1px 5px; border-radius: 4px;
+  background: var(--agy-control); color: var(--agy-ink); opacity: 0.65; flex-shrink: 0;
+}
+.agy-tab-overflow-item.is-hidden-tab:hover .agy-tab-overflow-restore { opacity: 1; }
+.agy-tab-overflow-item-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.agy-tab-overflow-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agy-tab-overflow-section-title,
+.agy-tab-overflow-section {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 8px 2px; font-size: 10px; font-weight: 600;
+  color: var(--agy-ink-soft); text-transform: uppercase; letter-spacing: 0.04em;
+  border-top: 1px solid var(--agy-rule); margin-top: 2px;
+}
+.agy-tab-overflow-section-title:first-child,
+.agy-tab-overflow-section:first-child { border-top: none; margin-top: 0; padding-top: 2px; }
+agy-toggle-group,
+.agy-toggle-group {
+  display: inline-flex; align-items: center; border-radius: var(--radius-lg, 0.5rem);
+  border: 1px solid var(--agy-rule);
+  background: color-mix(in srgb, var(--agy-control) 20%, transparent);
+  padding: 2px; gap: 2px; user-select: none;
+}
+.agy-toggle-group-grid {
+  display: grid; grid-template-columns: repeat(var(--agy-toggle-cols, 3), minmax(0, 1fr)); width: 100%;
+}
+.agy-toggle-item {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 22px; padding: 0 8px; gap: 4px; border-radius: var(--radius-md, 0.375rem);
+  border: none; outline: none; background: transparent; color: var(--agy-ink-soft);
+  font-family: inherit; font-size: var(--text-xs, 0.75rem); line-height: 1rem;
+  font-weight: var(--font-weight-medium, 500); cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  transition: background-color var(--agy-dur) var(--agy-ease), color var(--agy-dur) var(--agy-ease);
+}
+.agy-toggle-item:hover:not(:disabled) { color: var(--agy-ink); }
+.agy-toggle-item:disabled { opacity: 0.5; pointer-events: none; cursor: default; }
+.agy-toggle-item.active { background: var(--agy-control); color: var(--agy-ink); }
+.agy-toggle-count { font-size: 11px; opacity: 0.75; }

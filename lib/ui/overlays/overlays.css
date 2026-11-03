@@ -1,0 +1,62 @@
+/* AgyUI Module: overlays */
+.agy-context-menu {
+  position: fixed; z-index: 8800; min-width: 168px; padding: 4px;
+  border-radius: 10px; border: 1px solid var(--agy-rule);
+  background: var(--agy-card); color: var(--agy-ink);
+  box-shadow: 0 6px 16px -2px rgba(0, 0, 0, 0.28), 0 2px 6px -1px rgba(0, 0, 0, 0.18);
+  display: flex; flex-direction: column; gap: 1px; user-select: none; outline: none;
+}
+.agy-context-menu-item {
+  width: 100%; padding: 5px 8px; border: none; border-radius: 6px;
+  background: transparent; color: var(--agy-ink); font-family: inherit;
+  font-size: 13px; line-height: 18px; text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: 6px; outline: none;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.agy-context-menu-item:hover:not(:disabled),
+.agy-context-menu-item:focus-visible:not(:disabled) {
+  background: var(--agy-control); color: var(--agy-ink);
+}
+.agy-context-menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.agy-context-menu-item.danger { color: var(--agy-bad); }
+.agy-context-menu-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agy-context-menu-check { margin-left: 6px; color: var(--agy-accent); }
+.agy-context-menu-sep { height: 1px; margin: 3px 4px; background: var(--agy-rule); }
+.agy-toast {
+  position: fixed; right: 12px; bottom: 12px; z-index: 9500;
+  padding: 6px 10px; border-radius: 5px; background: var(--agy-card);
+  color: var(--agy-ink); border: 1px solid var(--agy-accent); font-size: 11px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); pointer-events: none;
+}
+.agy-toast.error { border-color: var(--agy-bad); color: var(--agy-bad); }
+.agy-consent-bar {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: var(--radius-md, 0.375rem);
+  background: rgba(243, 201, 73, 0.1); border: 1px solid rgba(243, 201, 73, 0.3);
+  font-size: var(--text-xs, 0.75rem); color: var(--agy-ink);
+}
+.agy-consent-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.agy-banner {
+  padding: 8px 10px; border-radius: var(--radius-lg, 0.5rem);
+  font-size: var(--text-xs, 0.75rem); margin-bottom: 10px;
+  border: 1px solid var(--agy-rule); background: transparent; color: var(--agy-ink);
+}
+.agy-banner.ok, .agy-banner.is-success {
+  border-color: rgba(99, 152, 79, 0.3); background: rgba(99, 152, 79, 0.12);
+  color: var(--status-ok, var(--agy-ok));
+}
+.agy-banner.warn, .agy-banner.is-warning {
+  border-color: rgba(243, 201, 73, 0.3); background: rgba(243, 201, 73, 0.1);
+  color: var(--status-warn, var(--agy-warn));
+}
+.agy-banner.err, .agy-banner.is-error {
+  border-color: rgba(222, 85, 85, 0.3); background: rgba(222, 85, 85, 0.12);
+  color: var(--status-err, var(--agy-err, var(--agy-bad)));
+}
+.agy-banner.update, .agy-banner.is-info, .agy-banner.accent {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 8px; padding: 8px 12px;
+  background: color-mix(in srgb, var(--agy-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--agy-accent) 35%, transparent);
+  color: var(--agy-ink);
+}

@@ -1,0 +1,71 @@
+/* AgyUI Module: surfaces */
+.agy-card {
+  padding: 12px; border-radius: var(--radius-xl, 0.75rem);
+  border: 1px solid var(--agy-rule); background: var(--agy-card); margin-bottom: 8px;
+}
+.agy-card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
+.agy-card-title {
+  display: flex; align-items: center; gap: 8px; font-weight: var(--font-weight-medium, 500);
+  font-size: var(--text-sm, 0.875rem); line-height: 1.25rem; color: var(--agy-ink); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agy-card-desc { font-size: var(--text-xs, 0.75rem); line-height: 1.5; color: var(--agy-ink-soft); margin-bottom: 10px; }
+.agy-card-meta { display: flex; align-items: center; gap: 6px; font-family: var(--agy-font-mono, monospace); font-size: 11px; color: var(--agy-ink-soft); }
+.agy-card-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.agy-card-section-bar {
+  grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 4px 2px 2px; border-bottom: 1px solid var(--agy-rule);
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--agy-ink-soft);
+}
+.agy-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+  border-radius: 9999px; font-family: inherit; font-size: 11px; line-height: 16px;
+  font-weight: var(--font-weight-medium, 500); border: none; flex-shrink: 0;
+  white-space: nowrap; background: rgba(142, 142, 142, 0.12); color: var(--agy-ink-soft);
+}
+.agy-badge-dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; flex-shrink: 0; }
+.agy-badge.running, .agy-badge.ready, .agy-badge.ok {
+  background: rgba(99, 152, 79, 0.12); color: var(--status-ok, var(--agy-ok));
+}
+.agy-badge.running .agy-badge-dot, .agy-badge.ready .agy-badge-dot, .agy-badge.ok .agy-badge-dot {
+  background: var(--status-ok-dot, var(--agy-ok));
+}
+.agy-badge.hibernated, .agy-badge.warn {
+  background: rgba(243, 201, 73, 0.12); color: var(--status-warn, var(--agy-warn));
+}
+.agy-badge.hibernated .agy-badge-dot, .agy-badge.warn .agy-badge-dot {
+  background: var(--status-warn-dot, var(--agy-warn));
+}
+.agy-badge.stopped, .agy-badge.off, .agy-badge.builtin {
+  background: rgba(142, 142, 142, 0.12); color: var(--agy-ink-soft);
+}
+.agy-badge.stopped .agy-badge-dot, .agy-badge.off .agy-badge-dot { background: var(--agy-ink-soft); }
+.agy-badge.errored, .agy-badge.error, .agy-badge.crit {
+  background: rgba(222, 85, 85, 0.12); color: var(--status-err, var(--agy-err, var(--agy-bad)));
+}
+.agy-badge.errored .agy-badge-dot, .agy-badge.error .agy-badge-dot, .agy-badge.crit .agy-badge-dot {
+  background: var(--status-err-dot, var(--agy-err, var(--agy-bad)));
+}
+.agy-badge.starting, .agy-badge.active, .agy-badge.update, .agy-badge.accent {
+  background: rgba(67, 128, 180, 0.12); color: var(--status-info, var(--agy-info, var(--agy-accent)));
+}
+.agy-badge.starting .agy-badge-dot, .agy-badge.active .agy-badge-dot,
+.agy-badge.update .agy-badge-dot, .agy-badge.accent .agy-badge-dot {
+  background: var(--status-info-dot, var(--agy-info, var(--agy-accent)));
+}
+.agy-status-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--agy-ink-soft); flex-shrink: 0; }
+.agy-status-dot.running { background: var(--status-ok-dot, var(--agy-ok)); }
+.agy-status-dot.hibernated { background: var(--status-warn-dot, var(--agy-warn)); }
+.agy-status-dot.errored { background: var(--status-err-dot, var(--agy-err, var(--agy-bad))); }
+.agy-status-dot.update { background: var(--status-info-dot, var(--agy-info, var(--agy-accent))); }
+.agy-count-pill {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 11px; line-height: 16px;
+  padding: 2px 8px; border-radius: 9999px; background: var(--agy-sunken);
+  color: var(--agy-ink-soft); font-weight: var(--font-weight-normal, 400);
+}
+.agy-empty,
+.agy-empty-state {
+  padding: 32px 16px; text-align: center; color: var(--agy-ink-soft);
+  font-size: var(--text-xs, 0.75rem); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+}

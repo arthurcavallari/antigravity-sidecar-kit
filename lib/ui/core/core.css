@@ -1,0 +1,15 @@
+/* AgyUI Module: core */
+.agy-icon { flex-shrink: 0; display: inline-block; vertical-align: middle; }
+.agy-icon-wrap { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 0; }
+.hidden { display: none !important; }
+agy-tab:not(:defined),
+agy-tab-strip:not(:defined),
+agy-toggle-group:not(:defined),
+agy-split-sash:not(:defined),
+agy-switch:not(:defined) {
+  opacity: 0;
+  animation: agy-ce-reveal 0.15s 1.5s forwards;
+}
+@keyframes agy-ce-reveal {
+  to { opacity: 1; }
+}

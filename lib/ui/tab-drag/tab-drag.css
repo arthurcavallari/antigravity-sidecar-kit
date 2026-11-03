@@ -1,0 +1,12 @@
+/* AgyUI Module: tab-drag */
+body.dragging-tab, body.dragging-tab * { cursor: grabbing !important; user-select: none !important; }
+body.dragging-tab iframe { pointer-events: none !important; }
+.agy-tab.is-dragging-source { opacity: 0 !important; pointer-events: none; }
+.agy-tab.is-dragging { opacity: 0.45; }
+.agy-tab-drag-ghost {
+  position: fixed !important; z-index: 8600; pointer-events: none; overflow: hidden;
+  border-radius: var(--radius-lg, 0.5rem); background: var(--agy-hover) !important;
+  color: var(--agy-ink) !important; border: 1px solid var(--agy-rule);
+  box-shadow: none; transform: none !important; margin: 0 !important;
+}
+.agy-tab-drag-ghost .agy-tab-close-wrap { display: none !important; }

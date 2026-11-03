@@ -1,0 +1,287 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { parseHTML } from 'linkedom';
+import { AGY_CLIENT_JS, AGY_SHELL_CSS } from '../lib/shell.mjs';
+import {
+  AGY_UI_CSS,
+  AGY_UI_CSS_MODULES,
+  AGY_UI_JS,
+  AGY_UI_JS_MODULES,
+  ALL_AGY_UI_MODULES,
+  attachAgyUI,
+  buildAgyUiCss,
+  buildAgyUiJs,
+  readModuleCss,
+  readModuleJs,
+  resolveAgyUiModules,
+} from '../lib/ui.mjs';
+import {
+  createShellClientHandler,
+  createShellCssHandler,
+  createUiCssHandler,
+  createUiJsHandler,
+  registerUiRoutes,
+} from '../lib/server.mjs';
+
+describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and tagged JSX', () => {
+  it('serves true per-module CSS and JS payloads and preserves module CSS banners', () => {
+    const shellCss = createShellCssHandler()().body;
+    const clientJs = createShellClientHandler()().body;
+    assert.equal(shellCss.includes('.agy-tab-strip'), false);
+    assert.equal(clientJs.includes('reconcileTabStrip'), false);
+
+    for (const mod of ALL_AGY_UI_MODULES) {
+      assert.ok(
+        AGY_UI_CSS_MODULES[mod].startsWith(`/* AgyUI Module: ${mod} */`),
+        `${mod}.css must start with /* AgyUI Module: ${mod} */`
+      );
+      assert.equal(readModuleCss(mod), AGY_UI_CSS_MODULES[mod]);
+      assert.equal(readModuleJs(mod), AGY_UI_JS_MODULES[mod]);
+      assert.ok(AGY_UI_CSS.includes(`/* AgyUI Module: ${mod} */`));
+    }
+    assert.equal(readModuleCss('controls').includes('/* AgyUI Module: core */'), false);
+    assert.equal(readModuleJs('controls').includes('compileTemplate'), false);
+
+    assert.deepEqual(resolveAgyUiModules(['controls', 'surfaces']), ['core', 'controls', 'surfaces']);
+    const subsetCss = buildAgyUiCss(['controls', 'surfaces']);
+    assert.ok(subsetCss.includes('.agy-btn'));
+    assert.ok(subsetCss.includes('.agy-card'));
+    assert.equal(subsetCss.includes('.agy-tab-strip'), false);
+
+    const subsetJs = buildAgyUiJs(['controls', 'surfaces']);
+    assert.ok(subsetJs.includes('renderSwitch'));
+    assert.ok(subsetJs.includes('renderCountPill'));
+    assert.equal(subsetJs.includes('reconcileTabStrip'), false);
+    assert.equal(subsetJs.includes('bindTabDragController'), false);
+    assert.equal(subsetJs.includes('bindSplitResize'), false);
+    assert.equal(subsetJs.includes('openContextMenu'), false);
+
+    const { window: win } = parseHTML('<!DOCTYPE html><html><body></body></html>');
+    const ui = attachAgyUI(win, { modules: ['controls', 'surfaces'] });
+    assert.equal(typeof ui.escHtml, 'function');
+    assert.equal(typeof ui.renderSwitch, 'function');
+    assert.equal(typeof ui.renderCountPill, 'function');
+    assert.equal(ui.reconcileTabStrip, undefined);
+
+    const pages = new Map();
+    registerUiRoutes({ page: (p, fn) => pages.set(p, fn) }, { modules: ['tabs', 'controls'] });
+    assert.equal(pages.has('/ui.css'), true);
+    assert.equal(pages.has('/ui.js'), true);
+    for (const m of ALL_AGY_UI_MODULES) {
+      assert.equal(pages.has(`/ui/${m}.css`), true);
+      assert.equal(pages.has(`/ui/${m}.js`), true);
+    }
+    const controlsRouteCss = pages.get('/ui/controls.css')().body;
+    const controlsRouteJs = pages.get('/ui/controls.js')().body;
+    assert.equal(controlsRouteCss, AGY_UI_CSS_MODULES.controls);
+    assert.equal(controlsRouteCss.includes('/* AgyUI Module: core */'), false);
+    assert.equal(controlsRouteJs, AGY_UI_JS_MODULES.controls);
+    assert.ok(controlsRouteJs.includes('renderSwitch'));
+    assert.equal(controlsRouteJs.includes('reconcileTabStrip'), false);
+    assert.ok(createUiCssHandler()().body.includes('.agy-tab'));
+    assert.ok(createUiJsHandler()().body.includes('reconcileTabStrip'));
+  });
+
+  it('contains zero consumer leaks (Hangar, --cm-*, .is-Connected, hub-add-tab) across shell and ui payloads', () => {
+    const combined = [AGY_SHELL_CSS, AGY_CLIENT_JS, AGY_UI_CSS, AGY_UI_JS].join('\n');
+    for (const forbidden of [
+      'Hangar',
+      'hangar',
+      '--cm-',
+      'is-Connected',
+      'is-Reconnecting',
+      'is-Disconnected',
+      'hub-add-tab',
+      '_replacedBy',
+      'sidecarId',
+      'sidecar-id',
+    ]) {
+      assert.equal(
+        combined.includes(forbidden),
+        false,
+        `Shared SDK payload must not contain consumer leak: ${forbidden}`
+      );
+    }
+  });
+
+  it('compiles AgyUI.html tagged JSX with AST caching, XSS escaping, SVG namespace, and attribute edge cases', () => {
+    const { window: win, document: doc } = parseHTML('<!DOCTYPE html><html><body></body></html>');
+    const ui = attachAgyUI(win);
+
+    const renderRow = (title, count) => ui.html`<div class="row" data-count="${count}">${title}</div>`;
+    const row1 = renderRow('First', 1);
+    const row2 = renderRow('Second', 2);
+    assert.equal(row1.className, 'row');
+    assert.equal(row1.getAttribute('data-count'), '1');
+    assert.equal(row2.textContent, 'Second');
+
+    let clicked = 0;
+    let ctxClicked = 0;
+    const xssPayload = '<img src=x onerror=alert(1)>';
+    const nestedBadge = ui.html`<span class="agy-badge ok">Safe</span>`;
+    const icon = ui.iconEl('grid_view', 14);
+    const card = ui.html`<div
+      class="agy-card ${'mod-a'} ${'mod-b'}"
+      style="width: ${75}%; height: ${24}px"
+      title = "a > b"
+      data-lt = "x < y"
+      onClick=${() => clicked++}
+      onMouseDown=${false}
+      onTabContextMenu=${() => ctxClicked++}
+      .customMeta=${{ ready: true }}
+      ?disabled=${true}
+      ?hidden=${false}
+    >
+      ${xssPayload}
+      ${nestedBadge}
+      ${icon}
+      ${0}${NaN}
+    </div>`;
+
+    doc.body.appendChild(card);
+    assert.equal(card.querySelector('img'), null, 'Interpolated string must be escaped as a Text node');
+    assert.ok(card.textContent.includes(xssPayload));
+    assert.equal(card.className, 'agy-card mod-a mod-b');
+    assert.equal(card.getAttribute('style'), 'width: 75%; height: 24px');
+    assert.equal(card.getAttribute('title'), 'a > b');
+    assert.equal(card.getAttribute('data-lt'), 'x < y');
+    assert.equal(card.hasAttribute('onmousedown'), false);
+    assert.equal(card.querySelector('.agy-badge'), nestedBadge);
+    assert.ok(card.querySelector('svg'));
+    assert.deepEqual(card.customMeta, { ready: true });
+    assert.equal(card.hasAttribute('disabled'), true);
+    assert.equal(card.hasAttribute('hidden'), false);
+
+    card.dispatchEvent(new win.Event('click'));
+    card.dispatchEvent(new win.CustomEvent('tab-contextmenu', { bubbles: true }));
+    assert.equal(clicked, 1);
+    assert.equal(ctxClicked, 1);
+
+    // Self-closing boolean attributes & SVG namespace
+    const selfClosed = ui.html`<div><input disabled/><input ?disabled=${true}/><input ?disabled=${null}/></div>`;
+    const inputs = selfClosed.querySelectorAll('input');
+    assert.equal(inputs[0].hasAttribute('disabled'), true);
+    assert.equal(inputs[1].hasAttribute('disabled'), true);
+    assert.equal(inputs[2].hasAttribute('disabled'), false);
+
+    const svgNode = ui.html`<svg viewBox="0 0 24 24" class="vec"><path d="M0 0"/></svg>`;
+    assert.equal(svgNode.namespaceURI, 'http://www.w3.org/2000/svg');
+    assert.equal(svgNode.firstElementChild.namespaceURI, 'http://www.w3.org/2000/svg');
+    assert.equal(svgNode.getAttribute('class'), 'vec');
+
+    const frag = ui.html`<><span>Alpha</span><span>Beta</span></>`;
+    const host = doc.createElement('section');
+    host.appendChild(frag);
+    assert.equal(host.children.length, 2);
+  });
+
+  it('supports createVisibilityPoller and X-Sidecar-Token forwarding in notifyAgent and apiCall', async () => {
+    const { window: domWin, document: domDoc } = parseHTML('<!DOCTYPE html><html><body></body></html>');
+    const winListeners = {};
+    const docListeners = {};
+    let ioCallback = null;
+
+    const doc = {
+      hidden: false,
+      documentElement: domDoc.documentElement,
+      addEventListener(ev, fn) {
+        (docListeners[ev] = docListeners[ev] || []).push(fn);
+      },
+      removeEventListener() {},
+    };
+    const win = {
+      parent: null,
+      addEventListener(ev, fn) {
+        (winListeners[ev] = winListeners[ev] || []).push(fn);
+      },
+      removeEventListener() {},
+    };
+    win.parent = win;
+
+    class MockIntersectionObserver {
+      constructor(cb) {
+        ioCallback = cb;
+      }
+      observe() {}
+      disconnect() {}
+    }
+
+    const timers = new Map();
+    let nextTimerId = 1;
+    vm.runInNewContext(AGY_CLIENT_JS, {
+      window: win,
+      document: doc,
+      IntersectionObserver: MockIntersectionObserver,
+      setTimeout(fn, ms) {
+        const id = nextTimerId++;
+        timers.set(id, { fn, ms });
+        return id;
+      },
+      clearTimeout(id) {
+        timers.delete(id);
+      },
+    });
+
+    assert.equal(win.Hangar, undefined, 'AGY_CLIENT_JS must not pollute window.Hangar');
+    let pollCount = 0;
+    const poller = win.AgyShell.createVisibilityPoller({
+      onPoll: () => {
+        pollCount++;
+      },
+      intervalMs: 2500,
+    });
+    poller.start();
+    assert.equal(pollCount, 1);
+
+    for (const fn of winListeners.message || []) {
+      fn({ source: win.parent, data: { type: 'sidecar-visibility', payload: { visible: false } } });
+    }
+    assert.equal(poller.isVisible(), false);
+    assert.equal(timers.size, 0);
+
+    for (const fn of winListeners.message || []) {
+      fn({ source: win.parent, data: { type: 'sidecar-visibility', payload: { visible: true } } });
+    }
+    assert.equal(poller.isVisible(), true);
+    assert.equal(pollCount, 2);
+
+    ioCallback([{ isIntersecting: false }]);
+    assert.equal(poller.isVisible(), false);
+    ioCallback([{ isIntersecting: true }]);
+    assert.equal(pollCount, 3);
+
+    doc.hidden = true;
+    for (const fn of docListeners.visibilitychange || []) fn();
+    assert.equal(poller.isVisible(), false);
+    doc.hidden = false;
+    for (const fn of docListeners.visibilitychange || []) fn();
+    assert.equal(pollCount, 4);
+    poller.stop();
+
+    const captured = [];
+    domWin.location = {
+      href: 'http://127.0.0.1:52000/?token=direct-tok-777&conversationId=conv-9',
+      search: '?token=direct-tok-777&conversationId=conv-9',
+    };
+    domWin.fetch = async (url, init) => {
+      captured.push({ url, init });
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    };
+    vm.runInNewContext(AGY_CLIENT_JS, {
+      window: domWin,
+      document: domDoc,
+      fetch: domWin.fetch,
+      URLSearchParams,
+      URL,
+      setTimeout,
+      clearTimeout,
+    });
+    await domWin.AgyShell.notifyAgent('hello from direct iframe');
+    assert.equal(captured[0].init.headers['X-Sidecar-Token'], 'direct-tok-777');
+
+    const iframeUi = attachAgyUI(domWin);
+    await iframeUi.apiCall('/api/mutate', { a: 1 });
+    assert.equal(captured[1].init.headers['X-Sidecar-Token'], 'direct-tok-777');
+  });
+});

@@ -64,5 +64,8 @@
   "scripts": {
     "test": "node --test",
     "test:pack": "node scripts/pack-smoke.mjs && node scripts/pack-smoke-create.mjs"
+  },
+  "devDependencies": {
+    "linkedom": "^0.18.15"
   }
 }
