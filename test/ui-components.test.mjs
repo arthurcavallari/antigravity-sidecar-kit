@@ -257,6 +257,81 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     );
     assert.deepEqual(toggleChanges, ['running']);
 
+    // Pre-rendered <agy-toggle-group> children support click + keyboard + change event
+    const preTg = ui.html`<agy-toggle-group>
+      <button type="button" class="agy-toggle-item active" data-tab="context">Context</button>
+      <button type="button" class="agy-toggle-item" data-tab="mcp">MCP</button>
+    </agy-toggle-group>`;
+    doc.body.appendChild(preTg);
+    const preChanges = [];
+    preTg.addEventListener('change', (e) => preChanges.push(e.detail.value));
+    assert.equal(preTg.value, 'context');
+    assert.deepEqual(
+      Array.from(preTg.querySelectorAll('.agy-toggle-item')).map((b) => [b.tabIndex, b.getAttribute('aria-selected')]),
+      [
+        [0, 'true'],
+        [-1, 'false'],
+      ]
+    );
+    preTg.querySelector('[data-tab="mcp"]').click();
+    assert.equal(preTg.value, 'mcp');
+    assert.equal(preTg.querySelector('[data-tab="mcp"]').classList.contains('active'), true);
+    assert.equal(preTg.querySelector('[data-tab="mcp"]').getAttribute('aria-selected'), 'true');
+    assert.deepEqual(preChanges, ['mcp']);
+    preTg.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    assert.equal(preTg.value, 'context');
+    assert.deepEqual(preChanges, ['mcp', 'context'], 'Arrow key navigation on pre-rendered items must dispatch change exactly once');
+
+    const roleOnlyTg = ui.html`<agy-toggle-group layout="grid">
+      <button type="button" class="agy-toggle-item active" data-role="split-dir">H</button>
+      <button type="button" class="agy-toggle-item" data-role="split-swap">S</button>
+    </agy-toggle-group>`;
+    doc.body.appendChild(roleOnlyTg);
+    assert.equal(roleOnlyTg.style.getPropertyValue('--agy-toggle-cols'), '2', 'Pre-rendered grid toggle group must set --agy-toggle-cols');
+    assert.deepEqual(
+      Array.from(roleOnlyTg.querySelectorAll('.agy-toggle-item')).map((b) => b.tabIndex),
+      [0, -1],
+      'Pre-rendered toggle group without item keys must initialize roving tabIndex'
+    );
+    const roleChanges = [];
+    let roleClicks = 0;
+    roleOnlyTg.addEventListener('change', (e) => roleChanges.push(e.detail.value));
+    roleOnlyTg.addEventListener('click', () => {
+      roleClicks++;
+    });
+    roleOnlyTg.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    assert.deepEqual(roleChanges, [], 'data-role buttons without item ids must not dispatch empty change events on keydown');
+    assert.equal(roleClicks, 0, 'data-role buttons without item ids must not auto-fire click actions on arrow key navigation');
+    assert.deepEqual(
+      Array.from(roleOnlyTg.querySelectorAll('.agy-toggle-item')).map((b) => b.tabIndex),
+      [-1, 0],
+      'ArrowRight on data-role toggle group must advance roving tabIndex to target button'
+    );
+    roleOnlyTg.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    assert.deepEqual(
+      Array.from(roleOnlyTg.querySelectorAll('.agy-toggle-item')).map((b) => b.tabIndex),
+      [0, -1],
+      'Second ArrowRight on data-role toggle group must advance from current roving button even when first button keeps .active'
+    );
+
+    const dataValTg = ui.html`<agy-toggle-group>
+      <button type="button" class="agy-toggle-item active" data-value="v1">V1</button>
+      <button type="button" class="agy-toggle-item" data-id="v2">V2</button>
+    </agy-toggle-group>`;
+    doc.body.appendChild(dataValTg);
+    assert.equal(dataValTg.value, 'v1');
+    dataValTg.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    assert.equal(dataValTg.value, 'v2');
+
+    // syncSwitchState syncs both outer button[role="switch"] and inner <agy-switch>
+    const wrappedSw = ui.html`<button type="button" role="switch" class="agy-switch"><agy-switch></agy-switch></button>`;
+    doc.body.appendChild(wrappedSw);
+    ui.syncSwitchState(wrappedSw, true, true);
+    assert.equal(wrappedSw.classList.contains('on'), true);
+    assert.equal(wrappedSw.getAttribute('aria-checked'), 'true');
+    assert.equal(wrappedSw.disabled, true);
+    assert.equal(wrappedSw.querySelector('agy-switch').checked, true);
+
     // <agy-tab> and <agy-tab-strip>
     const strip = doc.createElement('agy-tab-strip');
     strip.tabs = [

@@ -51,6 +51,49 @@ describe('manifest-validator', () => {
       assert.ok(res.errors.length >= 5);
       assert.ok(res.errors.every((e) => e.ruleId === 'SIDECAR-DRIFT-04'));
     });
+
+    it('accepts builtin sidecar mode (e.g. schedule) and rejects simultaneous command + builtin or invalid restart_policy', () => {
+      const builtinOk = validateSidecarJson({
+        builtin: 'schedule',
+        has_web_ui: true,
+        restart_policy: 'on-failure',
+        ui_config: {
+          display_name: 'Automation',
+          views: [
+            {
+              entrypoint: 'SIDECAR_UI_ENTRYPOINT_AUX_PANE',
+              path: '/ui',
+              title: 'Schedule',
+              icon: 'calendar',
+            },
+          ],
+        },
+        agent_permissions: {
+          access_grants: ['command:*', 'mcp:*'],
+          allows_user_interactions: true,
+        },
+      });
+      assert.equal(builtinOk.valid, true);
+      assert.equal(builtinOk.errors.length, 0);
+
+      const conflict = validateSidecarJson({
+        command: 'node',
+        builtin: 'schedule',
+        restart_policy: 'invalid-policy',
+        env: { BAD: 123 },
+        agent_permissions: { access_grants: [123], allows_user_interactions: 'yes' },
+      });
+      assert.equal(conflict.valid, false);
+      assert.equal(conflict.errors.length, 5);
+      assert.ok(conflict.errors.every((e) => e.ruleId === 'SIDECAR-DRIFT-04'));
+
+      const badScheduleArgs = validateSidecarJson({
+        builtin: 'schedule',
+        args: ['0 9 * * *'],
+      });
+      assert.equal(badScheduleArgs.valid, false);
+      assert.equal(badScheduleArgs.errors.length, 1);
+    });
   });
 
   describe('validateHubManifest', () => {

@@ -23,7 +23,7 @@ body.dragging-tab iframe {
   z-index: 8600;
   pointer-events: none;
   overflow: hidden;
-  border-radius: var(--radius-lg, 0.5rem);
+  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   background: var(--agy-hover) !important;
   color: var(--agy-ink) !important;
   border: 1px solid var(--agy-rule);

@@ -337,6 +337,7 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       assert.equal(pages.has('/'), true);
       assert.equal(pages.has('/ui.html'), true);
       assert.equal(pages.has('/agy.css'), true);
+      assert.equal(pages.has('/compiled_tailwind.css'), true);
       assert.equal(pages.has('/shell.css'), true);
       assert.equal(pages.has('/shell.js'), true);
       assert.equal(pages.has('/ui.css'), true);

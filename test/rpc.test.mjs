@@ -220,6 +220,21 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       sidecarId: 'context-monitor',
     });
 
+    const rpcMod = await import('../lib/rpc.mjs');
+    await rpcMod.getSidecarLogs('hangar', { ...opts, logFileName: 'sidecar.log', maxLines: 50 });
+    await rpcMod.getSidecarEvents('hangar', opts);
+    await rpcMod.listSidecarLogFiles('hangar', opts);
+    await rpcMod.resolveSidecarConfig('C:/sidecar/sidecar.json', opts);
+    assert.ok(calls[4].url.endsWith('/GetSidecarLogs'));
+    assert.deepEqual(JSON.parse(calls[4].init.body), {
+      sidecarId: 'hangar',
+      logFileName: 'sidecar.log',
+      maxLines: 50,
+    });
+    assert.ok(calls[5].url.endsWith('/GetSidecarEvents'));
+    assert.ok(calls[6].url.endsWith('/ListSidecarLogFiles'));
+    assert.ok(calls[7].url.endsWith('/ResolveSidecarConfig'));
+
     await assert.rejects(
       () =>
         callLsRpc(

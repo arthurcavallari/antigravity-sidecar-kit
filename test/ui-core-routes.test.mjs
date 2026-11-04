@@ -21,6 +21,7 @@ import {
   createShellCssHandler,
   createUiCssHandler,
   createUiJsHandler,
+  enforceSidecarToken,
   registerUiRoutes,
 } from '../lib/server.mjs';
 
@@ -81,6 +82,19 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.equal(controlsRouteJs.includes('reconcileTabStrip'), false);
     assert.ok(createUiCssHandler()().body.includes('.agy-tab'));
     assert.ok(createUiJsHandler()().body.includes('reconcileTabStrip'));
+
+    const tabsCss = readModuleCss('tabs');
+    assert.ok(tabsCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));'));
+    assert.ok(tabsCss.includes('background: none;'));
+    assert.ok(tabsCss.includes('mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent calc(100% - 18px));'));
+    assert.ok(tabsCss.includes(':has(> :is(.agy-tab-badge, .agy-tab-ext-badge):not(.hidden))'));
+    assert.ok(tabsCss.includes('mask-image: none;'));
+    assert.equal(tabsCss.includes('calc(100% - 14px)'), false);
+    assert.equal(tabsCss.includes('linear-gradient(to right, transparent 0%, var(--agy-hover) 25%)'), false);
+    assert.equal(tabsCss.includes('linear-gradient(to right, transparent 0%, var(--agy-control) 25%)'), false);
+    const tabDragCss = readModuleCss('tab-drag');
+    assert.ok(tabDragCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));'));
+    assert.equal(tabDragCss.includes('border-radius: var(--radius-lg, 0.5rem);'), false);
   });
 
   it('contains zero consumer leaks (Hangar, --cm-*, .is-Connected, hub-add-tab) across shell and ui payloads', () => {
@@ -103,6 +117,8 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
         `Shared SDK payload must not contain consumer leak: ${forbidden}`
       );
     }
+    assert.equal(readModuleJs('core').includes("Object.defineProperty(elProto, 'tabIndex'"), false);
+    assert.equal(AGY_UI_JS.includes("Object.defineProperty(elProto, 'tabIndex'"), false);
   });
 
   it('enforces readable multi-line formatting across all lib/ui CSS and shell CSS modules', () => {
@@ -211,6 +227,9 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     const host = doc.createElement('section');
     host.appendChild(frag);
     assert.equal(host.children.length, 2);
+
+    const mixedAttrEl = ui.html`<div class="btn ${false && 'active'} ${null} ${undefined} ${NaN} ${'ok'}"></div>`;
+    assert.equal(mixedAttrEl.className, 'btn ok');
   });
 
   it('supports createVisibilityPoller and X-Sidecar-Token forwarding in notifyAgent and apiCall', async () => {
@@ -262,12 +281,27 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
 
     assert.equal(win.Hangar, undefined, 'AGY_CLIENT_JS must not pollute window.Hangar');
     let pollCount = 0;
+    let hostMessages = 0;
+    let resolveInFlight = null;
     const poller = win.AgyShell.createVisibilityPoller({
       onPoll: () => {
         pollCount++;
+        if (resolveInFlight) {
+          const p = new Promise((r) => {
+            resolveInFlight = r;
+          });
+          return p;
+        }
+      },
+      onHostMessage: () => {
+        hostMessages++;
       },
       intervalMs: 2500,
     });
+    for (const fn of winListeners.message || []) {
+      fn({ source: win.parent, data: { type: 'custom-msg' } });
+    }
+    assert.equal(hostMessages, 0, 'listeners must not fire before start() when autoStart is false');
     poller.start();
     assert.equal(pollCount, 1);
 
@@ -294,6 +328,17 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     doc.hidden = false;
     for (const fn of docListeners.visibilitychange || []) fn();
     assert.equal(pollCount, 4);
+
+    // triggerNow() while a poll is in-flight queues pendingWake
+    resolveInFlight = true;
+    const inflightPromise = poller.triggerNow();
+    assert.equal(pollCount, 5);
+    poller.triggerNow();
+    const finishFirst = resolveInFlight;
+    resolveInFlight = null;
+    finishFirst();
+    await inflightPromise;
+    assert.equal(pollCount, 6, 'triggerNow during inFlight must queue a pendingWake tick upon completion');
     poller.stop();
 
     const captured = [];
@@ -320,5 +365,9 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     const iframeUi = attachAgyUI(domWin);
     await iframeUi.apiCall('/api/mutate', { a: 1 });
     assert.equal(captured[1].init.headers['X-Sidecar-Token'], 'direct-tok-777');
+
+    assert.equal(enforceSidecarToken({ headers: { 'X-Sidecar-Token': ['direct-tok-777'] } }, 'direct-tok-777'), true);
+    assert.equal(enforceSidecarToken({ req: { url: '/page?token=direct-tok-777', headers: {} } }, 'direct-tok-777'), true);
+    assert.equal(enforceSidecarToken({ req: { url: 'http://[invalid', headers: {} } }, 'direct-tok-777'), false);
   });
 });

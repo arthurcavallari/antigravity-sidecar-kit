@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -440,9 +440,10 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
     }
   });
 
-  it('ASK-03: per-conversation StateSync persists to brainDir even when dataDir is empty, honors stateFilename, and sanitizes sidecarId', () => {
+  it('ASK-03: per-conversation StateSync persists to brainDir even when dataDir is empty, honors stateFilename, reads legacy .sidecar-state fallback, and sanitizes sidecarId', () => {
     const tmpBrain = mkdtempSync(join(tmpdir(), 'kit-brain-ask03-'));
     const convUuid = '11111111-2222-3333-4444-555555555555';
+    const legacyUuid = '22222222-3333-4444-5555-666666666666';
     const sync = new StateSync({
       sidecarId: '../my-sidecar',
       perConversation: true,
@@ -455,8 +456,81 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
       const scratchPath = join(tmpBrain, convUuid, 'scratch', 'sidecars', sync.sidecarId, 'custom-state.json');
       const dotPath = join(tmpBrain, convUuid, '.sidecar-state', `${sync.sidecarId}.json`);
       assert.equal(existsSync(scratchPath), true, 'must persist to scratch/sidecars/<sidecarId>/<stateFilename>');
-      assert.equal(existsSync(dotPath), true, 'must also persist to .sidecar-state/<sidecarId>.json');
+      assert.equal(existsSync(dotPath), false, 'must not perform redundant write to legacy .sidecar-state path');
       assert.equal(sync.sidecarId.includes('..'), false, 'sidecarId must be sanitized against traversal');
+
+      const legacyDotDir = join(tmpBrain, legacyUuid, '.sidecar-state');
+      const legacyDotFile = join(legacyDotDir, `${sync.sidecarId}.json`);
+      mkdirSync(legacyDotDir, { recursive: true });
+      writeFileSync(legacyDotFile, JSON.stringify({ migrated: true, count: 99 }), 'utf8');
+      assert.deepEqual(sync.getState(legacyUuid), { migrated: true, count: 99 });
+    } finally {
+      sync.dispose();
+      rmSync(tmpBrain, { recursive: true, force: true });
+    }
+  });
+
+  it('dispatches registered StateSync mutators via mutate(action, payload) and handleMutate({ action, payload }) without leaking stale result keys, and handles malformed URLs safely', async () => {
+    const tmpBrain = mkdtempSync(join(tmpdir(), 'kit-brain-mutators-'));
+    const convUuid = '33333333-4444-5555-6666-777777777777';
+    let notifiedConv = '';
+    const sync = new StateSync({
+      sidecarId: 'mutator-test',
+      brainDir: tmpBrain,
+      initialState: { baseline: 'preserved' },
+      mutators: {
+        increment: async (payload) => ({ count: (payload.base || 0) + 1, staleOnly: 'from-increment' }),
+        resetWithNull: async () => ({ count: 0, cleared: null }),
+      },
+      notifyAgent: async (_msg, opts) => {
+        notifiedConv = opts.conversationId;
+        return {};
+      },
+      resolveConversation: async () => {
+        await new Promise((r) => setImmediate(r));
+        return convUuid;
+      },
+    });
+    try {
+      const actionRes = await sync.handleMutate({ action: 'increment', payload: { base: 10 } });
+      assert.equal(actionRes.ok, true);
+      assert.deepEqual(actionRes.result, { count: 11, staleOnly: 'from-increment' });
+      assert.equal(sync.getState().lastAction, 'increment');
+      assert.equal(sync.getState().baseline, 'preserved');
+
+      const secondRes = await sync.handleMutate({ action: 'resetWithNull', payload: {} });
+      assert.equal(secondRes.ok, true);
+      assert.deepEqual(secondRes.result, { count: 0, cleared: null });
+      assert.deepEqual(sync.getState().result, { count: 0, cleared: null }, 'sequential mutators must replace result without leaking stale keys or stripping null properties');
+      assert.equal(sync.getState().baseline, 'preserved', 'top-level state outside result must be preserved');
+
+      const unknownRes = await sync.handleMutate({ action: 'nonexistent', payload: {} });
+      assert.equal(unknownRes.ok, false);
+      assert.equal(unknownRes.status, 400);
+
+      const protoRes = await sync.handleMutate({ action: 'toString', payload: {} });
+      assert.equal(protoRes.ok, false);
+      assert.equal(protoRes.status, 400);
+
+      const notifyRes = await sync.handleNotify({ message: 'Async resolved notify', severity: 'info' });
+      assert.equal(notifyRes.ok, true);
+      assert.equal(notifiedConv, convUuid);
+
+      // Malformed req.url and array/case headers must not throw ERR_INVALID_URL
+      sync.uiAuthToken = 'tok-malformed';
+      const badUrlAuth = sync.checkAuth({}, { req: { url: 'http://[invalid', headers: { 'X-Sidecar-Token': ['tok-malformed'] } } });
+      assert.equal(badUrlAuth, null);
+      const sseRes = {
+        statusCode: 0,
+        writeHead(s) {
+          this.statusCode = s;
+        },
+        write() {},
+        end() {},
+        once() {},
+      };
+      sync.handleSse({ url: 'http://[invalid', headers: { 'X-Sidecar-Token': ['tok-malformed'] } }, sseRes);
+      assert.equal(sseRes.statusCode, 200);
     } finally {
       sync.dispose();
       rmSync(tmpBrain, { recursive: true, force: true });
