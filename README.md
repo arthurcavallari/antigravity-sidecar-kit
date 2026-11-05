@@ -1,5 +1,13 @@
 # Antigravity Sidecar Kit (`antigravity-sidecar-kit`)
 
+<p>
+  <a href="https://www.npmjs.com/package/antigravity-sidecar-kit"><img src="https://img.shields.io/npm/v/antigravity-sidecar-kit?logo=npm&color=cb3837" alt="npm version" height="20"></a>
+  <a href="https://github.com/arthurcavallari/antigravity-sidecar-kit/actions/workflows/test.yml"><img src="https://github.com/arthurcavallari/antigravity-sidecar-kit/actions/workflows/test.yml/badge.svg" alt="Tests" height="20"></a>
+  <img src="https://img.shields.io/node/v/antigravity-sidecar-kit?logo=nodedotjs&logoColor=white&color=339933" alt="Node.js version" height="20">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" height="20"></a>
+  <a href="https://github.com/sponsors/arthurcavallari"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub" height="20"></a>
+</p>
+
 > Zero-dependency SDK and CLI project scaffolder for **Google Antigravity** Auxiliary Pane sidecars.
 
 Google Antigravity's built-in `sidecar_sdk` provides a minimal `SidecarApp` loopback HTTP server, leaving every sidecar author to re-implement Language Server Connect RPC clients, CSRF credential caching, host theme seed & contrast resolution, `/compiled_tailwind.css` `@layer` proxying, UTF-8 BOM-safe `~/.gemini/config/config.json` mutation, and `_npx`-safe NTFS junction/symlink installation.
@@ -282,6 +290,14 @@ antigravity-sidecar-kit/
 - `runtime.json` is written owner-only; `config.json` writes are atomic.
 - Uninstall prunes old `npx` copies; setup warns about dependencies that the `npx` copy can't carry.
 - Scaffolded projects pass `ResponseClass: Response` and depend on the current kit version.
+
+---
+
+## Support
+
+Built and maintained in my spare time (with constant keyboard supervision from my three cats, **Snow** 🤍, **Eevee** 🦊, and **Merlin** 🧙‍♂️).
+
+If **Antigravity Sidecar Kit** saves you time building or scaffolding sidecars, consider [❤️ sponsoring me on GitHub Sponsors](https://github.com/sponsors/arthurcavallari) to help fund ongoing maintenance, new SDK capabilities, and the household Churu treat budget!
 
 ---
 
