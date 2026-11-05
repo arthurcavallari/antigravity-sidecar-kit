@@ -6,7 +6,7 @@ agy-tab-strip,
   gap: 1px;
   flex: 1 1 0%;
   min-width: 0;
-  padding: 4px 0;
+  padding: 4px;
   overflow-x: auto;
   scrollbar-width: none;
   overscroll-behavior-x: none;
@@ -39,9 +39,13 @@ agy-tab-strip::-webkit-scrollbar,
 
 .agy-tab-strip-sm {
   height: 32px;
-  padding: 2px 0;
+  padding: 2px 4px;
   gap: 1px;
   border-radius: var(--radius-md, 0.375rem);
+}
+
+.agy-tab-strip-sm .agy-tab:focus-visible {
+  outline-offset: 0px;
 }
 
 agy-tab,
@@ -74,6 +78,12 @@ agy-tab,
 .agy-tab:hover {
   background: var(--agy-hover);
   color: var(--agy-ink);
+}
+
+.agy-tab:focus-visible {
+  color: var(--agy-ink);
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }
 
 .agy-tab.active {
@@ -137,9 +147,15 @@ agy-tab,
   transition: background-color var(--agy-dur) var(--agy-ease), color var(--agy-dur) var(--agy-ease);
 }
 
-.agy-tab-pin:is(:hover, :focus-visible) {
+.agy-tab-pin:hover {
   color: var(--agy-ink);
   background: var(--agy-rule);
+}
+
+.agy-tab-pin:focus-visible {
+  color: var(--agy-ink);
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }
 
 .agy-tab-close-wrap {
@@ -205,14 +221,26 @@ agy-tab,
   transition: background-color var(--agy-dur) var(--agy-ease), color var(--agy-dur) var(--agy-ease);
 }
 
-.agy-tab-close:is(:hover, :focus-visible) {
+.agy-tab-close:hover {
   color: var(--agy-ink);
   background: var(--agy-rule);
 }
 
+.agy-tab-close:focus-visible {
+  color: var(--agy-ink);
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 1px;
+}
+
 .agy-tab-add,
-.agy-tab-add-btn {
-  margin-left: 2px;
+.agy-tab-add-btn,
+.agy-icon-btn.agy-tab-add,
+.agy-icon-btn.agy-tab-add-btn {
+  width: 28px;
+  height: 28px;
+  margin-left: 0;
+  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
+  color: var(--secondary-foreground, var(--agy-ink-soft));
   flex-shrink: 0;
 }
 
@@ -257,7 +285,7 @@ agy-tab,
   color: var(--agy-ink-soft);
 }
 
-.agy-tab-overflow-btn.has-hidden-tabs:hover {
+.agy-tab-overflow-btn.has-hidden-tabs:is(:hover, :focus-visible) {
   background: var(--agy-control);
   color: var(--agy-ink);
 }
@@ -308,9 +336,14 @@ agy-tab,
     opacity var(--agy-dur) var(--agy-ease);
 }
 
-.agy-tab-overflow-item:hover {
+.agy-tab-overflow-item:is(:hover, :focus-visible) {
   background: var(--agy-hover);
   color: var(--agy-ink);
+}
+
+.agy-tab-overflow-item:focus-visible {
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: -2px;
 }
 
 .agy-tab-overflow-item.active {
@@ -323,7 +356,7 @@ agy-tab,
   opacity: 0.78;
 }
 
-.agy-tab-overflow-item.is-hidden-tab:hover {
+.agy-tab-overflow-item.is-hidden-tab:is(:hover, :focus-visible) {
   opacity: 1;
 }
 
@@ -338,7 +371,7 @@ agy-tab,
   flex-shrink: 0;
 }
 
-.agy-tab-overflow-item.is-hidden-tab:hover .agy-tab-overflow-restore {
+.agy-tab-overflow-item.is-hidden-tab:is(:hover, :focus-visible) .agy-tab-overflow-restore {
   opacity: 1;
 }
 
@@ -415,8 +448,13 @@ agy-toggle-group,
   transition: background-color var(--agy-dur) var(--agy-ease), color var(--agy-dur) var(--agy-ease);
 }
 
-.agy-toggle-item:hover:not(:disabled) {
+.agy-toggle-item:is(:hover, :focus-visible):not(:disabled) {
   color: var(--agy-ink);
+}
+
+.agy-toggle-item:focus-visible:not(:disabled) {
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }
 
 .agy-toggle-item:disabled {

@@ -5,11 +5,11 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: var(--radius-md, 0.375rem);
+  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   border: none;
   outline: none;
   background: transparent;
-  color: var(--agy-ink-soft);
+  color: var(--secondary-foreground, var(--agy-ink-soft));
   cursor: pointer;
   flex-shrink: 0;
   padding: 0;
@@ -20,6 +20,11 @@
 .agy-icon-btn.active {
   background: var(--agy-control);
   color: var(--agy-ink);
+}
+
+.agy-icon-btn:focus-visible:not(:disabled) {
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }
 
 .agy-icon-btn:disabled {
@@ -44,7 +49,7 @@
   height: 24px;
   padding: 0 8px;
   gap: 4px;
-  border-radius: var(--radius-md, 0.375rem);
+  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   font-family: inherit;
   font-size: var(--text-xs, 0.75rem);
   line-height: 1rem;
@@ -68,8 +73,13 @@
   gap: 4px;
 }
 
-.agy-btn:hover:not(:disabled) {
+.agy-btn:is(:hover, :focus-visible):not(:disabled) {
   color: var(--agy-ink);
+}
+
+.agy-btn:focus-visible:not(:disabled) {
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }
 
 .agy-btn:disabled {
@@ -89,10 +99,15 @@
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
-:is(.agy-btn-primary, .agy-btn.primary):hover:not(:disabled) {
+:is(.agy-btn-primary, .agy-btn.primary):is(:hover, :focus-visible):not(:disabled) {
   background: var(--agy-accent);
   color: var(--primary-foreground, #ffffff);
   opacity: 0.9;
+}
+
+:is(.agy-btn-primary, .agy-btn.primary):focus-visible:not(:disabled) {
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }
 
 :is(.agy-btn-secondary, .agy-btn.secondary) {
@@ -100,7 +115,7 @@
   color: var(--agy-ink-soft);
 }
 
-:is(.agy-btn-secondary, .agy-btn.secondary):hover:not(:disabled) {
+:is(.agy-btn-secondary, .agy-btn.secondary):is(:hover, :focus-visible):not(:disabled) {
   color: var(--agy-ink);
 }
 
@@ -110,7 +125,7 @@
   color: var(--agy-ink-soft);
 }
 
-:is(.agy-btn-outline, .agy-btn.outline):hover:not(:disabled) {
+:is(.agy-btn-outline, .agy-btn.outline):is(:hover, :focus-visible):not(:disabled) {
   background: var(--agy-control);
   color: var(--agy-ink);
 }
@@ -120,7 +135,7 @@
   color: var(--status-err, var(--agy-err, var(--agy-bad)));
 }
 
-:is(.agy-btn-danger, .agy-btn.danger):hover:not(:disabled) {
+:is(.agy-btn-danger, .agy-btn.danger):is(:hover, :focus-visible):not(:disabled) {
   background: rgba(222, 85, 85, 0.22);
   color: var(--status-err, var(--agy-err, var(--agy-bad)));
 }
@@ -130,7 +145,7 @@
   color: var(--agy-ink-soft);
 }
 
-:is(.agy-btn-ghost, .agy-btn.ghost):hover:not(:disabled) {
+:is(.agy-btn-ghost, .agy-btn.ghost):is(:hover, :focus-visible):not(:disabled) {
   background: var(--agy-control);
   color: var(--agy-ink);
 }
@@ -149,10 +164,16 @@ agy-switch {
   border-radius: 9999px;
   background: var(--agy-control);
   border: none;
+  outline: none;
   padding: 0;
   cursor: pointer;
   transition: background-color 200ms ease-in-out;
   flex-shrink: 0;
+}
+
+.agy-switch:focus-visible:not(:disabled):not(.disabled) {
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }
 
 .agy-switch:is(.on, [aria-checked="true"]) {
@@ -235,8 +256,10 @@ agy-switch {
   color: var(--agy-ink-soft);
 }
 
-.agy-search-input:focus {
+.agy-search-input:is(:focus, :focus-visible) {
   border-color: var(--agy-accent);
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: -1px;
 }
 
 .agy-select {
@@ -250,4 +273,11 @@ agy-switch {
   font-size: var(--text-xs, 0.75rem);
   outline: none;
   cursor: pointer;
+  transition: border-color var(--agy-dur) var(--agy-ease);
+}
+
+.agy-select:is(:focus, :focus-visible) {
+  border-color: var(--agy-accent);
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }

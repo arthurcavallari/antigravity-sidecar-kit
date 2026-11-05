@@ -46,6 +46,8 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(stripEl.querySelector('.agy-tab-drop-hint'), null);
     const [pill1, pill2] = stripEl.querySelectorAll('.agy-tab');
     assert.equal(pill1.dataset.tabId, 't1');
+    assert.equal(pill1.querySelector('.agy-tab-close')?.getAttribute('tabindex'), '0');
+    assert.equal(pill1.querySelector('.agy-tab-pin')?.getAttribute('tabindex'), '-1');
     assert.equal(pill2.querySelector('.agy-tab-ext-badge')?.title, 'Opened externally');
 
     // Custom iconElement replacement and icon: null removal without clobbering _opts

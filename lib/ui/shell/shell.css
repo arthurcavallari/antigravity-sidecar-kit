@@ -20,6 +20,7 @@
   --agy-accent: var(--primary, #3a6ff7);
   --agy-accent-ink: color-mix(in srgb, var(--agy-accent) 60%, var(--agy-ink));
   --agy-accent-soft: color-mix(in srgb, var(--agy-accent) 10%, transparent);
+  --nux-focus-ring: color-mix(in srgb, var(--agy-accent) 55%, transparent);
   --agy-bad: #d93838;
   --agy-bad-soft: rgba(217, 56, 56, 0.13);
   --agy-bad-ink: #8c1d18;
@@ -59,6 +60,7 @@
   --agy-accent: var(--primary, #007acc);
   --agy-accent-ink: color-mix(in srgb, var(--agy-accent) 60%, var(--agy-ink));
   --agy-accent-soft: color-mix(in srgb, var(--agy-accent) 16%, transparent);
+  --nux-focus-ring: color-mix(in srgb, var(--agy-accent) 55%, transparent);
   --agy-bad: #ff6b6b;
   --agy-bad-soft: rgba(255, 107, 107, 0.17);
   --agy-bad-ink: #ffedea;
@@ -84,6 +86,7 @@
   --agy-ink-faint: var(--muted-foreground, color-mix(in srgb, var(--agy-ink) 60%, var(--agy-canvas)));
   --agy-accent-ink: color-mix(in srgb, var(--agy-accent) 60%, var(--agy-ink));
   --agy-accent-soft: color-mix(in srgb, var(--agy-accent) 10%, transparent);
+  --nux-focus-ring: color-mix(in srgb, var(--agy-accent) 55%, transparent);
   --agy-sunken: var(--muted, color-mix(in srgb, var(--agy-ink) 4%, var(--agy-canvas)));
   --agy-control: var(--secondary, color-mix(in srgb, var(--agy-ink) 12%, var(--agy-canvas)));
   --agy-hover: var(--muted, color-mix(in srgb, var(--agy-ink) 4%, var(--agy-canvas)));
@@ -102,6 +105,7 @@
   --agy-ink-faint: var(--muted-foreground, color-mix(in srgb, var(--agy-ink) 65%, var(--agy-canvas)));
   --agy-accent-ink: color-mix(in srgb, var(--agy-accent) 60%, var(--agy-ink));
   --agy-accent-soft: color-mix(in srgb, var(--agy-accent) 16%, transparent);
+  --nux-focus-ring: color-mix(in srgb, var(--agy-accent) 55%, transparent);
   --agy-sunken: var(--muted, color-mix(in srgb, var(--agy-ink) 4%, var(--agy-canvas)));
   --agy-control: var(--secondary, color-mix(in srgb, var(--agy-ink) 12%, var(--agy-canvas)));
   --agy-hover: var(--muted, color-mix(in srgb, var(--agy-ink) 4%, var(--agy-canvas)));
@@ -123,6 +127,15 @@
     --agy-raised: ButtonFace;
     --agy-accent: Highlight;
     --agy-accent-ink: Highlight;
+    --nux-focus-ring: Highlight;
     --agy-rule: ButtonBorder;
   }
+}
+
+:is(button, input, select, textarea, a, summary, [tabindex]):focus-visible:not(.no-focus-ring) {
+  --tw-ring-offset-shadow: 0 0 #0000;
+  --tw-ring-shadow: 0 0 #0000;
+  box-shadow: none;
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: 2px;
 }

@@ -18,6 +18,11 @@
   flex-shrink: 0;
 }
 
+.agy-chrome-bar .agy-icon-btn:not(.has-hidden-tabs) {
+  width: 28px;
+  height: 28px;
+}
+
 .agy-toolbar {
   display: flex;
   align-items: center;
@@ -53,10 +58,20 @@ agy-split-sash,
   pointer-events: none;
 }
 
-:is(agy-split-sash, .agy-split-sash):hover .sash-line,
+:is(agy-split-sash, .agy-split-sash):is(:hover, :focus-visible) .sash-line,
 body.resizing-split :is(agy-split-sash, .agy-split-sash) .sash-line {
   height: 7px;
   opacity: 0.5;
+}
+
+:is(agy-split-sash, .agy-split-sash):focus-visible {
+  outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
+  outline-offset: -2px;
+}
+
+:is(agy-split-sash, .agy-split-sash):focus-visible .sash-line {
+  background: var(--agy-accent);
+  opacity: 0.85;
 }
 
 agy-split-sash[direction="horizontal"],

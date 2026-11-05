@@ -95,6 +95,17 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     const tabDragCss = readModuleCss('tab-drag');
     assert.ok(tabDragCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));'));
     assert.equal(tabDragCss.includes('border-radius: var(--radius-lg, 0.5rem);'), false);
+    assert.ok(tabsCss.includes('.agy-tab:focus-visible'));
+    assert.ok(tabsCss.includes('.agy-tab-pin:focus-visible'));
+    assert.ok(tabsCss.includes('.agy-tab-close:focus-visible'));
+    assert.ok(tabsCss.includes('.agy-tab-overflow-item:focus-visible'));
+    assert.ok(tabsCss.includes('.agy-toggle-item:focus-visible:not(:disabled)'));
+    assert.ok(controlsRouteCss.includes('.agy-icon-btn:focus-visible:not(:disabled)'));
+    assert.ok(controlsRouteCss.includes('.agy-btn:focus-visible:not(:disabled)'));
+    assert.ok(controlsRouteCss.includes('.agy-switch:focus-visible:not(:disabled):not(.disabled)'));
+    assert.ok(controlsRouteCss.includes('.agy-select:is(:focus, :focus-visible)'));
+    assert.ok(readModuleCss('overlays').includes('.agy-context-menu-item:focus-visible:not(:disabled)'));
+    assert.ok(readModuleCss('layout').includes(':is(agy-split-sash, .agy-split-sash):focus-visible .sash-line'));
   });
 
   it('contains zero consumer leaks (Hangar, --cm-*, .is-Connected, hub-add-tab) across shell and ui payloads', () => {

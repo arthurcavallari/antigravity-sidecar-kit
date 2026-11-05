@@ -32,6 +32,7 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
       '--agy-rule: var(--border, rgba(128, 128, 128, 0.12));',
       '--agy-info: var(--link, var(--color-blue-500, #4380b4));',
       '--agy-info: var(--link, var(--color-blue-400, #6a9fcb));',
+      '--nux-focus-ring: color-mix(in srgb, var(--agy-accent) 55%, transparent);',
     ]) {
       assert.ok(AGY_SHELL_CSS.includes(tokenRule), `AGY_SHELL_CSS must include ${tokenRule}`);
     }
@@ -219,11 +220,12 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
           : {
               ok: true,
               headers: new Map([['content-type', 'text/css']]),
-              text: async () => ':root{--radius-sm:4px}@property --tw-x { syntax: "*"; }',
+              text: async () => ':root{--radius-sm:4px}button:focus-visible{outline:none !important}@property --tw-x { syntax: "*"; }',
             },
       forceRefresh: true,
     });
     assert.match(css, /^@layer agy-host \{[\s\S]*--radius-sm:4px[\s\S]*\}\n@property --tw-x/);
+    assert.equal(css.includes('!important'), false, '@layer agy-host must strip !important to prevent CSS Cascade Level 5 layer inversion');
 
     const cssPort1 = await fetchHostStylesheet({
       lsAddress: '127.0.0.1:9001',
