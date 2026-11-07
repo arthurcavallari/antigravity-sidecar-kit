@@ -88,6 +88,7 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.ok(tabsCss.includes('background: none;'));
     assert.ok(tabsCss.includes('mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent calc(100% - 18px));'));
     assert.ok(tabsCss.includes(':has(> :is(.agy-tab-badge, .agy-tab-ext-badge):not(.hidden))'));
+    assert.match(tabsCss, /\.agy-tab-close\s*\{[^}]*min-width:\s*22px;[^}]*min-height:\s*22px;/s);
     assert.ok(tabsCss.includes('mask-image: none;'));
     assert.equal(tabsCss.includes('calc(100% - 14px)'), false);
     assert.equal(tabsCss.includes('linear-gradient(to right, transparent 0%, var(--agy-hover) 25%)'), false);

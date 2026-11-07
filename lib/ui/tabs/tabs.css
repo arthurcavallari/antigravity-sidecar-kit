@@ -173,7 +173,7 @@ agy-tab,
   display: flex;
   align-items: center;
   padding-left: 16px;
-  padding-right: 6px;
+  padding-right: 4px;
   border-top-right-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   border-bottom-right-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   background: none;
@@ -216,6 +216,8 @@ agy-tab,
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 22px;
+  min-height: 22px;
   padding: 2px;
   border-radius: 4px;
   color: var(--muted-foreground, var(--agy-ink-faint));
