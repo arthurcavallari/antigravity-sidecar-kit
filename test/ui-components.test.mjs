@@ -518,6 +518,8 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(wrappedSw.getAttribute('aria-checked'), 'true');
     assert.equal(wrappedSw.disabled, true);
     assert.equal(wrappedSw.querySelector('agy-switch').checked, true);
+    assert.equal(wrappedSw.querySelector('agy-switch').getAttribute('role'), 'presentation');
+    assert.equal(wrappedSw.querySelector('agy-switch').getAttribute('aria-checked'), null);
 
     // <agy-tab> and <agy-tab-strip>
     const strip = doc.createElement('agy-tab-strip');
