@@ -479,8 +479,36 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     </agy-toggle-group>`;
     doc.body.appendChild(dataValTg);
     assert.equal(dataValTg.value, 'v1');
+    assert.equal(dataValTg.getAttribute('role'), 'radiogroup');
+    assert.equal(dataValTg.querySelector('[data-value="v1"]').getAttribute('role'), 'radio');
     dataValTg.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     assert.equal(dataValTg.value, 'v2');
+
+    const ttlTg = ui.html`<agy-toggle-group>
+      <button type="button" class="agy-toggle-item active" data-role="ttl-5" data-ttl="5">5m</button>
+      <button type="button" class="agy-toggle-item" data-role="ttl-10" data-ttl="10">10m</button>
+    </agy-toggle-group>`;
+    doc.body.appendChild(ttlTg);
+    let ttlClicked = '';
+    ttlTg.querySelector('[data-ttl="10"]').addEventListener('click', () => {
+      ttlClicked = '10';
+    });
+    ttlTg.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    assert.equal(ttlTg.value, '10');
+    assert.equal(ttlClicked, '10');
+    ttlTg.querySelector('[data-ttl="10"]').classList.remove('active');
+    ttlTg.sync();
+    assert.equal(ttlTg.value, '');
+    assert.equal(ttlTg.querySelector('[data-ttl="10"]').getAttribute('aria-checked'), 'false');
+
+    const tablistTg = ui.html`<agy-toggle-group role="tablist">
+      <button type="button" class="agy-toggle-item active" data-subtab="installed">Installed</button>
+      <button type="button" class="agy-toggle-item" data-subtab="discover">Discover</button>
+    </agy-toggle-group>`;
+    doc.body.appendChild(tablistTg);
+    assert.equal(tablistTg.querySelector('[data-subtab="installed"]').getAttribute('role'), 'tab');
+    assert.equal(tablistTg.querySelector('[data-subtab="installed"]').getAttribute('aria-selected'), 'true');
+    assert.equal(tablistTg.querySelector('[data-subtab="installed"]').getAttribute('aria-checked'), null);
 
     // syncSwitchState syncs both outer button[role="switch"] and inner <agy-switch>
     const wrappedSw = ui.html`<button type="button" role="switch" class="agy-switch"><agy-switch></agy-switch></button>`;
