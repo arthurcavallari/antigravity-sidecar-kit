@@ -289,6 +289,36 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     win.dispatchEvent(new win.PointerEvent('pointermove', { clientX: 390, clientY: 50 }));
     win.dispatchEvent(new win.PointerEvent('pointerup'));
     assert.deepEqual(ratios, [0.25, 0.8]);
+    assert.equal(sash.getAttribute('role'), 'separator');
+    assert.equal(sash.getAttribute('tabindex'), '0');
+    assert.equal(sash.getAttribute('aria-orientation'), 'vertical');
+    assert.equal(sash.getAttribute('aria-valuenow'), '80');
+
+    // Keyboard resizing (ArrowLeft / Home / End) and re-binding without duplicate listeners
+    const rebindDeltas = [];
+    let rebindStartX = 0;
+    ui.bindSplitResize(sash, {
+      direction: 'horizontal',
+      containerEl: container,
+      minRatio: 0.2,
+      maxRatio: 0.8,
+      onResizeStart: (e) => {
+        rebindStartX = e.clientX;
+      },
+      onResize: (r, e) => {
+        ratios.push(r);
+        rebindDeltas.push(e.clientX - rebindStartX);
+      },
+    });
+    sash.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+    assert.deepEqual(ratios, [0.25, 0.8, 0.75]);
+    assert.deepEqual(rebindDeltas, [-20]);
+    sash.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
+    assert.equal(ratios.at(-1), 0.2);
+    assert.equal(sash.getAttribute('aria-valuenow'), '20');
+    sash.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+    assert.equal(ratios.at(-1), 0.8);
+    assert.equal(sash.getAttribute('aria-valuenow'), '80');
 
     // Context menu keyboard navigation, innerWidth=0 clamping, & toast
     win.innerWidth = 0;
