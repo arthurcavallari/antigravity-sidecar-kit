@@ -7,6 +7,46 @@
   margin-bottom: 8px;
 }
 
+@keyframes agy-card-pulse {
+  0%,
+  18% {
+    border-color: var(--agy-accent);
+    box-shadow: 0 0 0 2px var(--nux-focus-ring, var(--agy-accent-soft));
+    background: color-mix(in srgb, var(--agy-accent) 11%, var(--agy-card));
+  }
+
+  30%,
+  38% {
+    border-color: color-mix(in srgb, var(--agy-accent) 40%, var(--agy-rule));
+    box-shadow: 0 0 0 0 transparent;
+    background: var(--agy-card);
+  }
+
+  50%,
+  75% {
+    border-color: var(--agy-accent);
+    box-shadow: 0 0 0 2px var(--nux-focus-ring, var(--agy-accent-soft));
+    background: color-mix(in srgb, var(--agy-accent) 11%, var(--agy-card));
+  }
+
+  100% {
+    border-color: var(--agy-accent);
+    box-shadow: 0 0 0 1px var(--agy-accent-soft);
+    background: color-mix(in srgb, var(--agy-accent) 5%, var(--agy-card));
+  }
+}
+
+.agy-card.agy-card-highlight {
+  border-color: var(--agy-accent);
+  box-shadow: 0 0 0 1px var(--agy-accent-soft);
+  background: color-mix(in srgb, var(--agy-accent) 5%, var(--agy-card));
+  animation: agy-card-pulse 1.4s var(--agy-ease) forwards;
+}
+
+.agy-card.agy-card-highlight.agy-card-highlight-settled {
+  animation: none;
+}
+
 .agy-card-header {
   display: flex;
   justify-content: space-between;
