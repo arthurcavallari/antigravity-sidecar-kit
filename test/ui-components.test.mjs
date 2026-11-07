@@ -185,6 +185,14 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.ok(dropMeta);
     assert.deepEqual(reorderedIds, ['beta', 'alpha']);
 
+    // Dragging second tab (pB) left to outermost slot 0 (before pA)
+    reorderedIds = null;
+    pB.dispatchEvent(new win.PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 2, clientX: 90, clientY: 15 }));
+    win.dispatchEvent(new win.PointerEvent('pointermove', { bubbles: true, buttons: 1, pointerId: 2, clientX: 10, clientY: 15 }));
+    assert.equal(pA.style.transform, 'translateX(64px)');
+    win.dispatchEvent(new win.PointerEvent('pointerup', { bubbles: true, pointerId: 2, clientX: 10, clientY: 15 }));
+    assert.deepEqual(reorderedIds, ['beta', 'alpha']);
+
     // Split resize controller
     const container = doc.createElement('div');
     const sash = doc.createElement('div');
