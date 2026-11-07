@@ -410,5 +410,49 @@ describe('antigravity-sidecar-kit/binary-stream', () => {
       await new Promise((r) => server.close(r));
     }
   });
+
+  it('supports rawOnly lazy decoding, split 5-byte headers, and >16 MiB frames with maxFrameBytes: Infinity', async () => {
+    const streamSub = await import('../lib/binary-stream.mjs');
+    let jsonParseCalls = 0;
+    const origParse = JSON.parse;
+    JSON.parse = (...args) => {
+      jsonParseCalls += 1;
+      return origParse(...args);
+    };
+    try {
+      const dataFrame = encodeConnectFrame({ step: 42, text: 'hello' }, 0);
+      const trailerFrame = encodeConnectFrame({ error: { code: 'not_found' } }, 2);
+      const acc = streamSub.createConnectFrameAccumulator({ maxFrameBytes: Infinity, rawOnly: true });
+
+      // Feed 1 byte at a time across the 5-byte header to exercise split-header peekConnectLength
+      for (let i = 0; i < 5; i++) {
+        assert.deepEqual(acc.push(dataFrame.subarray(i, i + 1)), []);
+      }
+      const frames = acc.push(Buffer.concat([dataFrame.subarray(5), trailerFrame]));
+      assert.equal(frames.length, 2);
+      // Only the trailer frame (flags=2) should have been JSON.parsed so far; flags=0 is lazy
+      assert.equal(jsonParseCalls, 1);
+      assert.equal(frames[1].data.error.code, 'not_found');
+      assert.equal(frames[0].raw.toString('utf8'), '{"step":42,"text":"hello"}');
+      // Accessing .data lazily parses once and memoizes
+      assert.deepEqual(frames[0].data, { step: 42, text: 'hello' });
+      assert.deepEqual(frames[0].data, { step: 42, text: 'hello' });
+      assert.equal(jsonParseCalls, 2);
+    } finally {
+      JSON.parse = origParse;
+    }
+
+    // 18 MiB frame (> 16 MiB DEFAULT_MAX_FRAME_BYTES) succeeds when maxFrameBytes: Infinity
+    const bigPayload = Buffer.alloc(18 * 1024 * 1024, 0x61);
+    const bigHeader = Buffer.alloc(5);
+    bigHeader.writeUInt8(0, 0);
+    bigHeader.writeUInt32BE(bigPayload.length, 1);
+    const bigAcc = streamSub.createConnectFrameAccumulator({ maxFrameBytes: Infinity, rawOnly: true });
+    assert.deepEqual(bigAcc.push(bigHeader), []);
+    assert.deepEqual(bigAcc.push(bigPayload.subarray(0, 8 * 1024 * 1024)), []);
+    const bigOut = bigAcc.push(bigPayload.subarray(8 * 1024 * 1024));
+    assert.equal(bigOut.length, 1);
+    assert.equal(bigOut[0].raw.length, 18 * 1024 * 1024);
+  });
 });
 
