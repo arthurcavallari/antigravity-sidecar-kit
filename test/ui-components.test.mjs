@@ -372,6 +372,13 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
 
     const toast = ui.showToast('Saved layout', { durationMs: 0 });
     assert.equal(toast.textContent, 'Saved layout');
+    assert.equal(toast.getAttribute('role'), 'status');
+    assert.equal(toast.getAttribute('aria-live'), 'polite');
+
+    const errToast = ui.showToast('Failed to save', { error: true, durationMs: 0 });
+    assert.equal(errToast.className, 'agy-toast error');
+    assert.equal(errToast.getAttribute('role'), 'alert');
+    assert.equal(errToast.getAttribute('aria-live'), 'assertive');
   });
 
   it('upgrades and dispatches events on Light-DOM Custom Elements (<agy-tab>, <agy-tab-strip>, <agy-toggle-group>, <agy-split-sash>, <agy-switch>)', () => {
