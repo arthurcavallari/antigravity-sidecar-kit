@@ -108,6 +108,12 @@ agy-tab,
   white-space: nowrap;
 }
 
+@media (max-width: 360px) {
+  .agy-tab-label {
+    max-width: 110px;
+  }
+}
+
 .agy-tab-badge {
   opacity: 0.78;
   font-size: var(--text-sm, 0.875rem);
