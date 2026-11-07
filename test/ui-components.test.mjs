@@ -129,6 +129,82 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(overflowItems[1].querySelector('.agy-tab-overflow-restore')?.textContent, 'Show');
     overflowItems[1].click();
     assert.equal(reopened, 'closed-1');
+
+    // Global Ctrl+Tab / Ctrl+Shift+Tab & Ctrl+Shift+. / Ctrl+Shift+, visual-order tab cycling + cross-iframe message forwarding
+    const cycleStrip = doc.createElement('div');
+    doc.body.appendChild(cycleStrip);
+    let activeCycleId = 'c1';
+    let tabFocused = false;
+    const scrollCalls = [];
+    const renderCycleTabs = () => {
+      ui.reconcileTabStrip(
+        cycleStrip,
+        [
+          { id: 'c1', label: 'First', active: activeCycleId === 'c1' },
+          { id: 'c2', label: 'Second', active: activeCycleId === 'c2' },
+          { id: 'c3', label: 'Third', active: activeCycleId === 'c3' },
+        ],
+        {
+          onSelect: (id) => {
+            activeCycleId = id;
+            renderCycleTabs();
+          },
+        }
+      );
+      for (const pill of cycleStrip.querySelectorAll('.agy-tab')) {
+        pill.scrollIntoView = (arg) => scrollCalls.push([pill.dataset.tabId, arg]);
+        pill.focus = () => {
+          tabFocused = true;
+        };
+      }
+    };
+    renderCycleTabs();
+
+    assert.equal(ui.matchTabCycleShortcut({ key: 'Tab', ctrlKey: true, shiftKey: false }), 1);
+    assert.equal(ui.matchTabCycleShortcut({ key: 'Tab', ctrlKey: true, shiftKey: true }), -1);
+    assert.equal(ui.matchTabCycleShortcut({ key: 'Tab', ctrlKey: true, altKey: true }), 0);
+    assert.equal(ui.matchTabCycleShortcut({ key: 'Tab', ctrlKey: true, metaKey: true }), 0);
+    assert.equal(ui.matchTabCycleShortcut({ key: 'Tab', ctrlKey: false }), 0);
+    assert.equal(ui.matchTabCycleShortcut({ code: 'Period', key: '>', ctrlKey: true, shiftKey: true }), 1);
+    assert.equal(ui.matchTabCycleShortcut({ code: 'Comma', key: '<', ctrlKey: true, shiftKey: true }), -1);
+
+    const cleanupCycle = ui.bindGlobalTabCycleKeydown(() => cycleStrip);
+    assert.equal(doc._hasLocalTabCycleHandler, true);
+
+    const textInput = doc.createElement('input');
+    doc.body.appendChild(textInput);
+
+    textInput.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true, cancelable: true }));
+    assert.equal(activeCycleId, 'c2', 'Ctrl+Tab advances to second tab even when focus is inside an input');
+    assert.equal(tabFocused, false, 'Ctrl+Tab must not move DOM focus onto the tab button');
+    assert.deepEqual(scrollCalls.at(-1), ['c2', { block: 'nearest', inline: 'nearest' }]);
+
+    // Repeat events are ignored for cycling
+    textInput.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, repeat: true, bubbles: true, cancelable: true }));
+    assert.equal(activeCycleId, 'c2');
+
+    // Ctrl+Shift+. advances to third tab and scrolls to inline: 'end'
+    textInput.dispatchEvent(new win.KeyboardEvent('keydown', { key: '>', code: 'Period', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    assert.equal(activeCycleId, 'c3');
+    assert.deepEqual(scrollCalls.at(-1), ['c3', { block: 'nearest', inline: 'end' }]);
+
+    // Wrap around from last tab to first tab (inline: 'start')
+    textInput.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true, cancelable: true }));
+    assert.equal(activeCycleId, 'c1');
+    assert.deepEqual(scrollCalls.at(-1), ['c1', { block: 'nearest', inline: 'start' }]);
+
+    // Ctrl+Shift+Tab wraps backwards from first tab to last tab
+    textInput.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    assert.equal(activeCycleId, 'c3');
+
+    // Forwarded message from child iframe cycles strip
+    const msgEv = new win.Event('message');
+    msgEv.data = { type: 'agy:shortcut-forwarded', dir: -1, repeat: false };
+    win.dispatchEvent(msgEv);
+    assert.equal(activeCycleId, 'c2');
+
+    cleanupCycle();
+    assert.equal(doc._hasLocalTabCycleHandler, false);
   });
 
   it('handles measureStrip, bindTabDragController (tab + strip level), bindSplitResize, openContextMenu, and showToast', () => {

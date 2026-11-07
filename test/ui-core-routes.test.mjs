@@ -380,5 +380,20 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.equal(enforceSidecarToken({ headers: { 'X-Sidecar-Token': ['direct-tok-777'] } }, 'direct-tok-777'), true);
     assert.equal(enforceSidecarToken({ req: { url: '/page?token=direct-tok-777', headers: {} } }, 'direct-tok-777'), true);
     assert.equal(enforceSidecarToken({ req: { url: 'http://[invalid', headers: {} } }, 'direct-tok-777'), false);
+
+    // Child iframe forwards Ctrl+Tab / Ctrl+Shift+Tab to window.parent when no local tab cycle handler is bound
+    const forwardedToParent = [];
+    domWin.parent = {
+      postMessage(msg, targetOrigin) {
+        forwardedToParent.push({ msg, targetOrigin });
+      },
+    };
+    domWin.AgyShell.bindParentShortcutForwarder({ root: domDoc.documentElement });
+    domDoc.documentElement.dispatchEvent(
+      new domWin.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true })
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(forwardedToParent)), [
+      { msg: { type: 'agy:shortcut-forwarded', dir: -1, repeat: false }, targetOrigin: '*' },
+    ]);
   });
 });
