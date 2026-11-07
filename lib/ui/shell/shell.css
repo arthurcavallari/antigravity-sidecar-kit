@@ -124,11 +124,19 @@
     --agy-ink-faint: GrayText;
     --agy-canvas: Canvas;
     --agy-card: Canvas;
+    --agy-card-edge: ButtonBorder;
+    --agy-sunken: Canvas;
+    --agy-control: ButtonFace;
+    --agy-hover: ButtonFace;
     --agy-raised: ButtonFace;
     --agy-accent: Highlight;
     --agy-accent-ink: Highlight;
     --nux-focus-ring: Highlight;
     --agy-rule: ButtonBorder;
+    --agy-ok: Highlight;
+    --agy-warn: Highlight;
+    --agy-err: LinkText;
+    --agy-bad: LinkText;
   }
 }
 
@@ -138,4 +146,34 @@
   box-shadow: none;
   outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
   outline-offset: 2px;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(128, 128, 128, 0.38);
+  border-radius: var(--agy-radius-pill, 9999px);
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active {
+  background-color: rgba(128, 128, 128, 0.62);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@media (forced-colors: active) {
+  *::-webkit-scrollbar-thumb {
+    background-color: CanvasText;
+    forced-color-adjust: none;
+  }
 }
