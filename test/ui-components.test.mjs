@@ -510,6 +510,18 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(tablistTg.querySelector('[data-subtab="installed"]').getAttribute('aria-selected'), 'true');
     assert.equal(tablistTg.querySelector('[data-subtab="installed"]').getAttribute('aria-checked'), null);
 
+    const multiTg = ui.html`<agy-toggle-group role="group" aria-label="Workspace Scope">
+      <button type="button" class="agy-toggle-item" data-role="global-btn">Global (*)</button>
+      <button type="button" class="agy-toggle-item active" data-role="add-ws-btn">Workspace</button>
+    </agy-toggle-group>`;
+    doc.body.appendChild(multiTg);
+    assert.equal(multiTg.querySelector('[data-role="global-btn"]').getAttribute('aria-pressed'), 'false');
+    assert.equal(multiTg.querySelector('[data-role="add-ws-btn"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(multiTg.querySelector('[data-role="global-btn"]').getAttribute('aria-selected'), null);
+    multiTg.querySelector('[data-role="add-ws-btn"]').classList.remove('active');
+    multiTg.sync();
+    assert.equal(multiTg.querySelector('[data-role="add-ws-btn"]').getAttribute('aria-pressed'), 'false');
+
     // syncSwitchState syncs both outer button[role="switch"] and inner <agy-switch>
     const wrappedSw = ui.html`<button type="button" role="switch" class="agy-switch"><agy-switch></agy-switch></button>`;
     doc.body.appendChild(wrappedSw);
