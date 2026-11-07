@@ -117,14 +117,37 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
       onReopenClosed: (id) => (reopened = id),
     });
 
+    assert.equal(overflowBtn.getAttribute('aria-haspopup'), 'menu');
+    assert.equal(overflowBtn.getAttribute('aria-expanded'), 'false');
+    assert.equal(popoverEl.getAttribute('role'), 'menu');
     assert.equal(overflowBtn.querySelector('.agy-tab-overflow-badge')?.textContent, '1');
     Object.defineProperty(stripEl, 'scrollWidth', { value: 320, configurable: true });
     Object.defineProperty(stripEl, 'clientWidth', { value: 200, configurable: true });
     stripEl._updateScroll();
     assert.equal(stripEl.classList.contains('mask-right'), true);
+    let overflowTriggerFocused = false;
+    overflowBtn.focus = () => {
+      overflowTriggerFocused = true;
+    };
     overflowBtn.click();
+    assert.equal(overflowBtn.getAttribute('aria-expanded'), 'true');
     const overflowItems = popoverEl.querySelectorAll('.agy-tab-overflow-item');
     assert.equal(overflowItems.length, 2);
+    assert.equal(overflowItems[0].getAttribute('role'), 'menuitem');
+    assert.equal(overflowItems[1].getAttribute('role'), 'menuitem');
+    assert.equal(popoverEl._focusIdx, 0, 'First overflow item receives focus on open');
+    const focusedOverflowIndices = [];
+    overflowItems.forEach((btn, idx) => {
+      btn.focus = () => {
+        focusedOverflowIndices.push(idx);
+      };
+    });
+    popoverEl.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    assert.equal(popoverEl._focusIdx, 1);
+    assert.deepEqual(focusedOverflowIndices, [1]);
+    popoverEl.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    assert.equal(overflowBtn.getAttribute('aria-expanded'), 'false');
+    assert.equal(overflowTriggerFocused, true, 'Escape inside overflow popover restores focus to overflowBtn');
     assert.ok(overflowItems[1].querySelector('svg path')?.getAttribute('d')?.includes('M120-520v-320h320'));
     assert.equal(overflowItems[1].querySelector('.agy-tab-overflow-restore')?.textContent, 'Show');
     overflowItems[1].click();
@@ -320,15 +343,28 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(ratios.at(-1), 0.8);
     assert.equal(sash.getAttribute('aria-valuenow'), '80');
 
-    // Context menu keyboard navigation, innerWidth=0 clamping, & toast
+    // Context menu keyboard navigation, focus restoration on Escape, innerWidth=0 clamping, & toast
     win.innerWidth = 0;
     let menuClicked = false;
-    const menu = ui.openContextMenu({ clientX: 140, clientY: 180 }, [
+    let triggerRestored = false;
+    const menuTrigger = doc.createElement('button');
+    menuTrigger.focus = () => {
+      triggerRestored = true;
+    };
+    const menu = ui.openContextMenu({ clientX: 140, clientY: 180, target: menuTrigger }, [
       { id: 'disabled-item', label: 'Disabled', disabled: true },
       { separator: true },
       { id: 'pin', icon: 'keep', label: 'Pin Tab', checked: true, onClick: () => (menuClicked = true) },
     ]);
     assert.equal(menu.style.left, '140px');
+    doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    assert.equal(triggerRestored, true, 'Escape closes context menu and restores focus to trigger');
+
+    ui.openContextMenu({ clientX: 140, clientY: 180, target: menuTrigger }, [
+      { id: 'disabled-item', label: 'Disabled', disabled: true },
+      { separator: true },
+      { id: 'pin', icon: 'keep', label: 'Pin Tab', checked: true, onClick: () => (menuClicked = true) },
+    ]);
     doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     assert.equal(menuClicked, true);
