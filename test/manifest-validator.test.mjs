@@ -223,13 +223,50 @@ describe('manifest-validator', () => {
         assert.equal('url' in fixedMcp.mcpServers.figma, false);
 
         const fixedHooks = JSON.parse(readFileSync(join(tmpDir, 'hooks', 'hooks.json'), 'utf8'));
-        assert.equal(fixedHooks.hooks.PreToolUse[0].matcher, 'call_mcp_tool|mcp_tool');
+        assert.equal(fixedHooks.hooks.PreToolUse[0].matcher, 'call_mcp_tool|mcp_*|mcp_tool');
 
         const fixedRule = readFileSync(join(tmpDir, 'rules', 'AGENTS.md'), 'utf8');
         assert.match(fixedRule, /\.\/skills\/foo\/SKILL\.md/);
         assert.match(fixedRule, /\.\/rules\/bar\.md/);
         assert.equal(fixedRule.includes('${PLUGIN_ROOT}'), false);
         assert.equal(fixedRule.includes('${CLAUDE_PLUGIN_ROOT}'), false);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('autofixes BIGIN-01 mcp__ matchers the same way agy-plugin-porter remapMatcher does (eager mcp_<server>_<tool>)', () => {
+      // Expected values are agy-plugin-porter's remapMatcher output for the same matchers, except
+      // the invalid regex last: the porter reports it unmapped, the linter keeps the generic MCP tools.
+      const cases = [
+        ['mcp__zoho__delete_record|run_command', 'call_mcp_tool|mcp_tool|mcp_zoho_delete_record|run_command'],
+        ['mcp__github__.*', 'call_mcp_tool|mcp_github_.*|mcp_tool'],
+        ['mcp__github__', 'call_mcp_tool|mcp_github_.*|mcp_tool'],
+        ['run_command|mcp__zoho__(delete|drop)', 'call_mcp_tool|mcp_tool|mcp_zoho_(delete|drop)|run_command'],
+        ['(mcp__a__x|mcp__b__y)', '(mcp_a_x|mcp_b_y)|call_mcp_tool|mcp_tool'],
+        [
+          '^mcp__[A-Za-z0-9._-]*[Ee][Xx][Aa][Bb][Ee][Aa][Mm][A-Za-z0-9._-]*__',
+          'call_mcp_tool|mcp_[A-Za-z0-9._-]*[Ee][Xx][Aa][Bb][Ee][Aa][Mm][A-Za-z0-9._-]*_.*|mcp_tool',
+        ],
+        ['.*mcp__.*', 'call_mcp_tool|mcp_tool'],
+        ['mcp__bad__(', 'call_mcp_tool|mcp_tool'],
+      ];
+      const tmpDir = mkdtempSync(join(tmpdir(), 'kit-lint-mcp-'));
+      try {
+        const entry = (matcher) => ({ matcher, hooks: [{ type: 'command', command: 'node guard.mjs' }] });
+        writeFileSync(
+          join(tmpDir, 'hooks.json'),
+          JSON.stringify({ native: { PreToolUse: cases.map(([m]) => entry(m)) } }, null, 2)
+        );
+        const first = lintPluginOrSidecar(tmpDir, { fix: false });
+        assert.equal(first.errors.filter((d) => d.ruleId === 'BIGIN-01').length, cases.length);
+
+        const fixed = lintPluginOrSidecar(tmpDir, { fix: true });
+        assert.equal(fixed.fixedCount, cases.length);
+        const out = JSON.parse(readFileSync(join(tmpDir, 'hooks.json'), 'utf8')).native.PreToolUse;
+        assert.deepEqual(out.map((e) => e.matcher), cases.map(([, want]) => want));
+
+        assert.equal(lintPluginOrSidecar(tmpDir, { fix: true }).fixedCount, 0);
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
