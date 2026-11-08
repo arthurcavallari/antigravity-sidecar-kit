@@ -111,16 +111,20 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     ui.setupStripScroll(stripEl, {
       overflowBtn,
       popoverEl,
+      idDatasetKey: 'sidecarId',
       getItems: () => [{ id: 't1', label: 'Tab 1', icon: 'folder', status: 'running', pinned: true }],
       onSelect: (id) => selected.push(id),
-      getClosedItems: () => [{ id: 'closed-1', displayName: 'Hidden Tab' }],
+      getClosedItems: () => [
+        { id: 'closed-1', displayName: 'Hidden Tab' },
+        { sidecarId: '__terminal__', displayName: 'Terminal', icon: 'terminal' },
+      ],
       onReopenClosed: (id) => (reopened = id),
     });
 
     assert.equal(overflowBtn.getAttribute('aria-haspopup'), 'menu');
     assert.equal(overflowBtn.getAttribute('aria-expanded'), 'false');
     assert.equal(popoverEl.getAttribute('role'), 'menu');
-    assert.equal(overflowBtn.querySelector('.agy-tab-overflow-badge')?.textContent, '1');
+    assert.equal(overflowBtn.querySelector('.agy-tab-overflow-badge')?.textContent, '2');
     Object.defineProperty(stripEl, 'scrollWidth', { value: 320, configurable: true });
     Object.defineProperty(stripEl, 'clientWidth', { value: 200, configurable: true });
     stripEl._updateScroll();
@@ -132,9 +136,10 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     overflowBtn.click();
     assert.equal(overflowBtn.getAttribute('aria-expanded'), 'true');
     const overflowItems = popoverEl.querySelectorAll('.agy-tab-overflow-item');
-    assert.equal(overflowItems.length, 2);
+    assert.equal(overflowItems.length, 3);
     assert.equal(overflowItems[0].getAttribute('role'), 'menuitem');
     assert.equal(overflowItems[1].getAttribute('role'), 'menuitem');
+    assert.equal(overflowItems[2].getAttribute('role'), 'menuitem');
     assert.equal(popoverEl._focusIdx, 0, 'First overflow item receives focus on open');
     const focusedOverflowIndices = [];
     overflowItems.forEach((btn, idx) => {
@@ -152,6 +157,8 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(overflowItems[1].querySelector('.agy-tab-overflow-restore')?.textContent, 'Show');
     overflowItems[1].click();
     assert.equal(reopened, 'closed-1');
+    overflowItems[2].click();
+    assert.equal(reopened, '__terminal__', 'setupStripScroll resolves tab.sidecarId when tab.id/tab.tabId are absent');
 
     // Global Ctrl+Tab / Ctrl+Shift+Tab & Ctrl+Shift+. / Ctrl+Shift+, visual-order tab cycling + cross-iframe message forwarding
     const cycleStrip = doc.createElement('div');

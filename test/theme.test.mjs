@@ -202,6 +202,16 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
       const fromStorage = resolveHostTheme({ themeMode: 'THEME_MODE_DARK' }, storagePath);
       assert.equal(fromStorage.theme, 'Tokyo Night');
       assert.equal(fromStorage.cssVariables['--background'], '#1A1B26');
+
+      writeJsonNoBom(storagePath, {
+        'theme-preset-dark': 'Default Dark',
+        'jetski.contrast': '2',
+      });
+      const defaultDarkOnyx = resolveHostTheme({ themeMode: 'THEME_MODE_DARK' }, storagePath);
+      assert.equal(defaultDarkOnyx.theme, 'Onyx Dark');
+      assert.equal(defaultDarkOnyx.contrast, 'high');
+      assert.equal(defaultDarkOnyx.cssVariables['--background'], '#050507');
+      assert.equal(defaultDarkOnyx.cssVariables['--secondary-foreground'], '#EAEBF1');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
