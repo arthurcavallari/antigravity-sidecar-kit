@@ -105,6 +105,8 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.ok(controlsRouteCss.includes('.agy-btn:focus-visible:not(:disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-switch:focus-visible:not(:disabled):not(.disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-select:is(:focus, :focus-visible)'));
+    assert.match(controlsRouteCss, /\.agy-search-box\s*>\s*svg,\s*\.agy-search-icon\s*\{[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);/s);
+    assert.equal(controlsRouteCss.includes('.agy-search-box svg'), false);
     assert.ok(readModuleCss('overlays').includes('.agy-context-menu-item:focus-visible:not(:disabled)'));
     assert.ok(readModuleCss('layout').includes(':is(agy-split-sash, .agy-split-sash):focus-visible .sash-line'));
   });

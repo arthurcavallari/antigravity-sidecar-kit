@@ -225,16 +225,20 @@ agy-switch {
   min-width: 180px;
 }
 
-.agy-search-box svg,
+.agy-search-box > svg,
 .agy-search-icon {
   position: absolute;
   left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--agy-ink-soft);
   pointer-events: none;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.agy-search-box:focus-within :is(svg, .agy-search-icon) {
+.agy-search-box:focus-within :is(> svg, .agy-search-icon) {
   color: var(--agy-ink);
 }
 
