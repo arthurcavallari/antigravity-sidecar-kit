@@ -1,9 +1,11 @@
 /* AgyUI Module: surfaces */
+/* Cards match Antigravity's agy-card (2.29): a border with no fill, on the page background, and a 16px radius
+   under the new UX (12px otherwise) */
 .agy-card {
   padding: 12px;
-  border-radius: var(--radius-xl, 0.75rem);
+  border-radius: var(--nux-radius-lg, var(--radius-xl, 0.75rem));
   border: 1px solid var(--agy-rule);
-  background: var(--agy-card);
+  background: transparent;
   margin-bottom: 8px;
 }
 
@@ -116,12 +118,13 @@
   font-family: inherit;
   font-size: 11px;
   line-height: 16px;
-  font-weight: var(--font-weight-medium, 500);
+  /* Antigravity's status badge: normal weight, and the muted fill by default */
+  font-weight: var(--font-weight-normal, 400);
   border: none;
   flex-shrink: 0;
   white-space: nowrap;
-  background: rgba(142, 142, 142, 0.12);
-  color: var(--agy-ink-soft);
+  background: var(--agy-sunken);
+  color: var(--agy-ink-faint);
 }
 
 .agy-badge-dot {
@@ -151,8 +154,8 @@
 }
 
 .agy-badge:is(.stopped, .off, .builtin) {
-  background: rgba(142, 142, 142, 0.12);
-  color: var(--agy-ink-soft);
+  background: var(--agy-sunken);
+  color: var(--agy-ink-faint);
 }
 
 .agy-badge:is(.stopped, .off) .agy-badge-dot {

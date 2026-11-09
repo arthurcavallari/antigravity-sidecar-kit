@@ -113,6 +113,18 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.ok(controlsRouteCss.includes('.agy-form-field.is-invalid .agy-input'));
     assert.match(controlsRouteCss, /\.agy-search-box\s*>\s*svg,\s*\.agy-search-icon\s*\{[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);/s);
     assert.equal(controlsRouteCss.includes('.agy-search-box svg'), false);
+
+    // Components match Antigravity 2.29's own: buttons default to its "sm" size, with its xs/md/lg sizes
+    assert.match(controlsRouteCss, /\.agy-btn\s*\{[^}]*height:\s*28px;[^}]*padding:\s*0 10px;[^}]*font-size:\s*var\(--text-sm/s);
+    assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-xs\s*\{[^}]*height:\s*24px;/s);
+    assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-md\s*\{[^}]*height:\s*32px;/s);
+    assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-lg\s*\{[^}]*height:\s*36px;/s);
+    assert.match(controlsRouteCss, /:is\(\.agy-btn-danger, \.agy-btn\.danger\)\s*\{[^}]*background:\s*var\(--color-red-500, #de5555\);[^}]*color:\s*#ffffff;/s);
+    assert.match(controlsRouteCss, /\.agy-search-input\s*\{[^}]*height:\s*32px;[^}]*border-radius:\s*var\(--nux-radius-pill[^}]*background:\s*var\(--agy-sunken\);/s);
+    const surfacesCss = readModuleCss('surfaces');
+    assert.match(surfacesCss, /\.agy-card\s*\{[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*transparent;/s, 'cards: a border, no fill');
+    assert.match(surfacesCss, /\.agy-badge\s*\{[^}]*font-weight:\s*var\(--font-weight-normal, 400\);[^}]*background:\s*var\(--agy-sunken\);/s);
+    assert.match(readModuleCss('overlays'), /\.agy-banner\s*\{[^}]*padding:\s*10px 12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*font-size:\s*var\(--text-sm[^}]*background:\s*var\(--agy-card\);/s, 'banners match the callout');
     assert.ok(readModuleCss('overlays').includes('.agy-context-menu-item:focus-visible:not(:disabled)'));
     assert.ok(readModuleCss('layout').includes(':is(agy-split-sash, .agy-split-sash):focus-visible .sash-line'));
   });
