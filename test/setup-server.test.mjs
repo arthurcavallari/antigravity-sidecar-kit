@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  chmodSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -8,13 +9,14 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonSafe, writeJsonNoBom } from '../lib/config.mjs';
-import { isRealDirectory, resolvePermanentLinkSource, runSidecarSetup } from '../lib/setup.mjs';
+import { isRealDirectory, removeLinkOrDir, resolvePermanentLinkSource, runSidecarSetup } from '../lib/setup.mjs';
 import {
   createAgyCssHandler,
   createAssetHandler,
@@ -31,6 +33,45 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
     const started = process.hrtime.bigint();
     assert.equal(sanitizeSidecarName(`${'-'.repeat(200_000)}a`), 'a');
     assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 200, 'sanitizing took too long');
+  });
+  it('removeLinkOrDir deletes read-only files, as in a git clone, without following links', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-remove-test-'));
+    try {
+      const outside = join(dir, 'outside');
+      mkdirSync(outside);
+      const outsideFile = join(outside, 'keep.txt');
+      writeFileSync(outsideFile, 'keep');
+      chmodSync(outsideFile, 0o444);
+      writeFileSync(join(outside, 'writable.txt'), 'keep');
+
+      const clone = join(dir, 'clone');
+      const pack = join(clone, '.git', 'objects', 'pack');
+      mkdirSync(pack, { recursive: true });
+      for (const f of ['pack-1.idx', 'pack-1.pack']) {
+        writeFileSync(join(pack, f), 'x');
+        chmodSync(join(pack, f), 0o444);
+      }
+      symlinkSync(outside, join(clone, 'linked'), 'junction');
+
+      assert.equal(removeLinkOrDir(clone), true);
+      assert.equal(existsSync(clone), false);
+      assert.equal(readFileSync(outsideFile, 'utf8'), 'keep', 'a linked folder is never entered');
+      assert.equal(readFileSync(join(outside, 'writable.txt'), 'utf8'), 'keep', 'files behind a link are never deleted');
+      assert.equal(statSync(outsideFile).mode & 0o200, 0, 'files behind a link stay read-only');
+
+      const lone = join(dir, 'lone.txt');
+      writeFileSync(lone, 'x');
+      chmodSync(lone, 0o444);
+      assert.equal(removeLinkOrDir(lone), true);
+      assert.equal(existsSync(lone), false);
+      assert.equal(removeLinkOrDir(lone), false);
+    } finally {
+      // So that cleanup works even when removeLinkOrDir is broken
+      for (const f of ['outside/keep.txt', 'clone/.git/objects/pack/pack-1.idx', 'clone/.git/objects/pack/pack-1.pack', 'lone.txt']) {
+        try { chmodSync(join(dir, f), 0o666); } catch {}
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
   it('resolvePermanentLinkSource copies out of _npx and guarantees node_modules/antigravity-sidecar-kit in both nested and hoisted layouts', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kit-npx-test-'));
