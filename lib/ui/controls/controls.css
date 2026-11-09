@@ -42,17 +42,20 @@
   }
 }
 
+/* Buttons match Antigravity's own (its Button component, 2.29): the default is its "sm" size, 28px with 14px text
+   and 10px side padding, a pill under the new UX. -xs, -md and -lg are its other sizes. */
 .agy-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 24px;
-  padding: 0 8px;
-  gap: 4px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 10px;
+  gap: 6px;
   border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   font-family: inherit;
-  font-size: var(--text-xs, 0.75rem);
-  line-height: 1rem;
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.25rem;
   font-weight: var(--font-weight-medium, 500);
   border: none;
   outline: none;
@@ -60,7 +63,7 @@
   user-select: none;
   white-space: nowrap;
   background: var(--agy-control);
-  color: var(--agy-ink-soft);
+  color: var(--secondary-foreground, var(--agy-ink-soft));
   transition:
     background-color var(--agy-dur) var(--agy-ease),
     color var(--agy-dur) var(--agy-ease),
@@ -70,7 +73,27 @@
 .agy-btn.has-icon {
   padding-left: 6px;
   padding-right: 8px;
+}
+
+.agy-btn.agy-btn-xs {
+  height: 24px;
   gap: 4px;
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1rem;
+}
+
+.agy-btn.agy-btn-md {
+  height: 32px;
+}
+
+.agy-btn.agy-btn-lg {
+  height: 36px;
+  padding: 0 12px;
+}
+
+.agy-btn.agy-btn-lg.has-icon {
+  padding-left: 10px;
+  padding-right: 12px;
 }
 
 .agy-btn:is(:hover, :focus-visible):not(:disabled) {
@@ -112,7 +135,7 @@
 
 :is(.agy-btn-secondary, .agy-btn.secondary) {
   background: var(--agy-control);
-  color: var(--agy-ink-soft);
+  color: var(--secondary-foreground, var(--agy-ink-soft));
 }
 
 :is(.agy-btn-secondary, .agy-btn.secondary):is(:hover, :focus-visible):not(:disabled) {
@@ -122,7 +145,7 @@
 :is(.agy-btn-outline, .agy-btn.outline) {
   background: transparent;
   border: 1px solid var(--agy-rule);
-  color: var(--agy-ink-soft);
+  color: var(--secondary-foreground, var(--agy-ink-soft));
 }
 
 :is(.agy-btn-outline, .agy-btn.outline):is(:hover, :focus-visible):not(:disabled) {
@@ -130,19 +153,20 @@
   color: var(--agy-ink);
 }
 
+/* Antigravity's "destructive" button: solid red with white text */
 :is(.agy-btn-danger, .agy-btn.danger) {
-  background: rgba(222, 85, 85, 0.12);
-  color: var(--status-err, var(--agy-err, var(--agy-bad)));
+  background: var(--color-red-500, #de5555);
+  color: #ffffff;
 }
 
 :is(.agy-btn-danger, .agy-btn.danger):is(:hover, :focus-visible):not(:disabled) {
-  background: rgba(222, 85, 85, 0.22);
-  color: var(--status-err, var(--agy-err, var(--agy-bad)));
+  background: var(--color-red-600, #cb3d3d);
+  color: #ffffff;
 }
 
 :is(.agy-btn-ghost, .agy-btn.ghost) {
   background: transparent;
-  color: var(--agy-ink-soft);
+  color: var(--muted-foreground, var(--agy-ink-faint));
 }
 
 :is(.agy-btn-ghost, .agy-btn.ghost):is(:hover, :focus-visible):not(:disabled) {
@@ -228,7 +252,7 @@ agy-switch {
 .agy-search-box > svg,
 .agy-search-icon {
   position: absolute;
-  left: 10px;
+  left: 8px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--agy-ink-soft);
@@ -242,39 +266,41 @@ agy-switch {
   color: var(--agy-ink);
 }
 
+/* Matches Antigravity's Customizations search box: a 32px pill on --muted, the icon 8px in, 14px text */
 .agy-search-input {
+  box-sizing: border-box;
   width: 100%;
-  height: 28px;
-  padding: 0 10px 0 30px;
-  border-radius: var(--radius-lg, 0.5rem);
+  height: 32px;
+  padding: 0 12px 0 28px;
+  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   border: 1px solid var(--agy-rule);
-  background: var(--agy-card);
+  background: var(--agy-sunken);
   color: var(--agy-ink);
   font-family: inherit;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-sm, 0.875rem);
   outline: none;
   transition: border-color var(--agy-dur) var(--agy-ease);
 }
 
 .agy-search-input::placeholder {
-  color: var(--agy-ink-soft);
+  color: var(--placeholder, var(--agy-ink-faint));
 }
 
 .agy-search-input:is(:focus, :focus-visible) {
-  border-color: var(--agy-accent);
   outline: 2px solid var(--nux-focus-ring, var(--agy-accent));
-  outline-offset: -1px;
+  outline-offset: 2px;
 }
 
+/* A pill, as Antigravity's select triggers are under the new UX */
 .agy-select {
   height: 28px;
-  padding: 2px 8px;
-  border-radius: var(--radius-lg, 0.5rem);
+  padding: 2px 10px;
+  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   border: 1px solid var(--agy-rule);
-  background: var(--agy-card);
+  background: var(--agy-sunken);
   color: var(--agy-ink);
   font-family: inherit;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-sm, 0.875rem);
   outline: none;
   cursor: pointer;
   transition: border-color var(--agy-dur) var(--agy-ease);
