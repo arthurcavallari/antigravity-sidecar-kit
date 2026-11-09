@@ -388,6 +388,34 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(errToast.getAttribute('aria-live'), 'assertive');
   });
 
+  it('renderField wires the label and help text to the input, escapes values, and renders a textarea when multiline', () => {
+    const { doc, ui } = createDomEnv();
+    doc.body.innerHTML = ui.renderField({
+      id: 'source', label: 'Source', help: 'A folder or owner/repo@tag', placeholder: 'owner/repo@v1', required: true,
+      value: '"><b>x</b>', attrs: 'autocomplete="off"',
+    });
+    const field = doc.querySelector('.agy-form-field');
+    const input = field.querySelector('input.agy-input');
+    assert.equal(field.querySelector('label.agy-field-label').getAttribute('for'), 'source');
+    assert.equal(input.id, 'source');
+    assert.equal(input.getAttribute('type'), 'text');
+    assert.equal(input.getAttribute('placeholder'), 'owner/repo@v1');
+    assert.equal(input.getAttribute('value'), '"><b>x</b>', 'the value is escaped, not injected');
+    assert.equal(doc.querySelector('b'), null);
+    assert.equal(input.getAttribute('aria-describedby'), 'source-help');
+    assert.equal(input.hasAttribute('required'), true);
+    assert.equal(input.getAttribute('autocomplete'), 'off');
+    assert.equal(doc.getElementById('source-help').textContent, 'A folder or owner/repo@tag');
+
+    doc.body.innerHTML = ui.renderField({ id: 'notes', multiline: true, value: 'a < b' });
+    const area = doc.querySelector('textarea.agy-input');
+    // linkedom keeps textarea content as raw text; a browser decodes this to "a < b"
+    assert.equal(area.innerHTML, 'a &lt; b', 'the value is escaped');
+    assert.equal(area.hasAttribute('aria-describedby'), false, 'no help text, no description');
+    assert.equal(doc.querySelector('label'), null, 'no label when none is given');
+    assert.throws(() => ui.renderField({}), /needs an id/);
+  });
+
   it('upgrades and dispatches events on Light-DOM Custom Elements (<agy-tab>, <agy-tab-strip>, <agy-toggle-group>, <agy-split-sash>, <agy-switch>)', () => {
     const { win, doc, ui } = createDomEnv();
 
