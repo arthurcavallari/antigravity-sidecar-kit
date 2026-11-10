@@ -122,7 +122,7 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.match(controlsRouteCss, /:is\(\.agy-btn-danger, \.agy-btn\.danger\)\s*\{[^}]*background:\s*var\(--color-red-500, #de5555\);[^}]*color:\s*#ffffff;/s);
     assert.match(controlsRouteCss, /\.agy-search-input\s*\{[^}]*height:\s*32px;[^}]*border-radius:\s*var\(--nux-radius-pill[^}]*background:\s*var\(--agy-sunken\);/s);
     const surfacesCss = readModuleCss('surfaces');
-    assert.match(surfacesCss, /\.agy-card\s*\{[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*transparent;/s, 'cards: a border, no fill');
+    assert.match(surfacesCss, /\.agy-card\s*\{[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--agy-card\);/s, 'cards: the 16px radius and the card fill');
     assert.match(surfacesCss, /\.agy-badge\s*\{[^}]*font-weight:\s*var\(--font-weight-normal, 400\);[^}]*background:\s*var\(--agy-sunken\);/s);
     assert.match(readModuleCss('overlays'), /\.agy-banner\s*\{[^}]*padding:\s*10px 12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*font-size:\s*var\(--text-sm[^}]*background:\s*var\(--agy-card\);/s, 'banners match the callout');
     assert.ok(readModuleCss('overlays').includes('.agy-context-menu-item:focus-visible:not(:disabled)'));

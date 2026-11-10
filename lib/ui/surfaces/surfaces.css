@@ -1,11 +1,11 @@
 /* AgyUI Module: surfaces */
-/* Cards match Antigravity's agy-card (2.29): a border with no fill, on the page background, and a 16px radius
-   under the new UX (12px otherwise) */
+/* Cards take Antigravity's 16px radius under the new UX (12px otherwise). Unlike its agy-card they keep the card
+   fill, so each card stands apart from the pane */
 .agy-card {
   padding: 12px;
   border-radius: var(--nux-radius-lg, var(--radius-xl, 0.75rem));
   border: 1px solid var(--agy-rule);
-  background: transparent;
+  background: var(--agy-card);
   margin-bottom: 8px;
 }
 
