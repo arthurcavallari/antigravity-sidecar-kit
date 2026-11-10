@@ -306,6 +306,13 @@ agy-switch {
   transition: border-color var(--agy-dur) var(--agy-ease);
 }
 
+/* The muted fill is translucent, and Chromium paints the option list with the select's background over a white
+   base, so the list needs an opaque color of its own */
+.agy-select :is(option, optgroup) {
+  background-color: var(--agy-card);
+  color: var(--agy-ink);
+}
+
 .agy-select:is(:focus, :focus-visible) {
   border-color: var(--agy-accent);
   outline: 2px solid var(--nux-focus-ring, var(--agy-accent));

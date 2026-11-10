@@ -105,6 +105,8 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.ok(controlsRouteCss.includes('.agy-btn:focus-visible:not(:disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-switch:focus-visible:not(:disabled):not(.disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-select:is(:focus, :focus-visible)'));
+    // The select's fill is translucent, so its option list gets an opaque one (else it shows white in dark themes)
+    assert.match(controlsRouteCss, /\.agy-select :is\(option, optgroup\)\s*\{[^}]*background-color:\s*var\(--agy-card\);[^}]*color:\s*var\(--agy-ink\);/s);
     // The text field matches Antigravity's: a pill on the host's --muted fill, with its focus ring and placeholder
     assert.match(controlsRouteCss, /\.agy-input\s*\{[^}]*height:\s*32px;[^}]*border-radius:\s*var\(--nux-radius-pill[^}]*background:\s*var\(--agy-sunken\);/s);
     assert.ok(controlsRouteCss.includes('.agy-input:focus-visible'));
