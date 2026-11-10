@@ -127,6 +127,11 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.match(surfacesCss, /\.agy-card\s*\{[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--agy-card\);/s, 'cards: the 16px radius and the card fill');
     assert.match(surfacesCss, /\.agy-badge\s*\{[^}]*font-weight:\s*var\(--font-weight-normal, 400\);[^}]*background:\s*var\(--agy-sunken\);/s);
     assert.match(readModuleCss('overlays'), /\.agy-banner\s*\{[^}]*padding:\s*10px 12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*font-size:\s*var\(--text-sm[^}]*background:\s*var\(--agy-card\);/s, 'banners match the callout');
+    assert.match(
+      readModuleCss('overlays'),
+      /\.agy-toast\s*\{[^}]*max-width:\s*24rem;[^}]*padding:\s*12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--glass, var\(--agy-card\)\);[^}]*font-size:\s*var\(--text-sm/s,
+      'toasts match the native toast',
+    );
     assert.ok(readModuleCss('overlays').includes('.agy-context-menu-item:focus-visible:not(:disabled)'));
     assert.ok(readModuleCss('layout').includes(':is(agy-split-sash, .agy-split-sash):focus-visible .sash-line'));
   });
