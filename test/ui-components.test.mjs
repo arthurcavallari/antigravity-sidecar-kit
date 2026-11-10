@@ -378,14 +378,64 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     win.innerWidth = 800;
 
     const toast = ui.showToast('Saved layout', { durationMs: 0 });
-    assert.equal(toast.textContent, 'Saved layout');
-    assert.equal(toast.getAttribute('role'), 'status');
-    assert.equal(toast.getAttribute('aria-live'), 'polite');
+    assert.equal(toast.querySelector('.agy-toast-title').textContent, 'Saved layout');
 
     const errToast = ui.showToast('Failed to save', { error: true, durationMs: 0 });
     assert.equal(errToast.className, 'agy-toast error');
-    assert.equal(errToast.getAttribute('role'), 'alert');
-    assert.equal(errToast.getAttribute('aria-live'), 'assertive');
+    assert.equal(doc.querySelectorAll('.agy-toast').length, 1, 'one toast at a time');
+  });
+
+  it('showToast matches Antigravity\'s toast: a title, a description, a close button and a separate live region', async () => {
+    const { doc, ui } = createDomEnv();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const toast = ui.showToast('Reloaded github-mcp', { description: '38 tools', durationMs: 0 });
+    assert.equal(toast.className, 'agy-toast');
+    assert.equal(toast.hasAttribute('role') || toast.hasAttribute('aria-live'), false, 'the toast holds a button, so it is not the live region');
+    assert.equal(toast.querySelector('.agy-toast-title').textContent, 'Reloaded github-mcp');
+    assert.equal(toast.querySelector('.agy-toast-description').textContent, '38 tools');
+    const close = toast.querySelector('button.agy-toast-close');
+    assert.equal(close.getAttribute('type'), 'button');
+    assert.equal(close.getAttribute('aria-label'), 'Dismiss notification');
+    assert.ok(close.querySelector('svg[aria-hidden="true"]'), 'the close icon is the 16px close glyph');
+
+    const status = doc.getElementById('agy-toast-live-status');
+    assert.equal(status.className, 'agy-toast-live');
+    assert.equal(status.getAttribute('role'), 'status');
+    assert.equal(status.getAttribute('aria-live'), 'polite');
+    assert.equal(status.getAttribute('aria-atomic'), 'true');
+    await sleep(70);
+    assert.equal(status.textContent, 'Reloaded github-mcp. 38 tools');
+
+    const errToast = ui.showToast('Failed to save', { error: true, durationMs: 0 });
+    const alertRegion = doc.getElementById('agy-toast-live-alert');
+    assert.equal(alertRegion.getAttribute('role'), 'alert');
+    assert.equal(alertRegion.getAttribute('aria-live'), 'assertive');
+    await sleep(70);
+    assert.equal(alertRegion.textContent, 'Failed to save');
+
+    errToast.querySelector('.agy-toast-close').click();
+    assert.ok(errToast.hasAttribute('data-ending'), 'closing starts the exit transition');
+    await sleep(330);
+    assert.equal(doc.querySelector('.agy-toast'), null);
+  });
+
+  it('showToast closes on Escape, defaults to 5 seconds, and pauses its timer while hovered', async () => {
+    const { win, doc, ui } = createDomEnv();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    assert.match(ui.showToast.toString(), /opts\.durationMs \?\? 5000/, 'Antigravity\'s default toast timeout');
+
+    const hovered = ui.showToast('Saved', { durationMs: 80 });
+    hovered.dispatchEvent(new win.Event('pointerenter'));
+    await sleep(150);
+    assert.equal(hovered.hasAttribute('data-ending'), false, 'paused while the pointer is on it');
+    hovered.dispatchEvent(new win.Event('pointerleave'));
+    await sleep(140);
+    assert.ok(hovered.hasAttribute('data-ending'), 'resumes when the pointer leaves');
+
+    const focused = ui.showToast('Saved again', { durationMs: 0 });
+    focused.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.ok(focused.hasAttribute('data-ending'));
+    assert.equal(doc.querySelectorAll('.agy-toast').length, 1);
   });
 
   it('renderField wires the label and help text to the input, escapes values, and renders a textarea when multiline', () => {

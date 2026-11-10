@@ -72,24 +72,118 @@
   background: var(--agy-rule);
 }
 
+/* Toasts match Antigravity's toast (2.29): a glass card with a 16px radius under the new UX (12px otherwise),
+   12px padding, 14px medium text, a secondary description line and a 16px close button. Like its toast viewport,
+   it sits 12px from the bottom and sides, right-aligned and at most 24rem wide, and slides up as it appears.
+   Sidecars aren't sent the glass tokens, so the card fill, border and overlay shadow stand in for them.
+   Antigravity's toasts have no error look; ours tint the edge red so a failure still stands out. */
 .agy-toast {
   position: fixed;
+  left: 12px;
   right: 12px;
   bottom: 12px;
   z-index: 9500;
-  padding: 6px 10px;
-  border-radius: 5px;
-  background: var(--agy-card);
+  max-width: 24rem;
+  margin-left: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--nux-radius-lg, var(--radius-xl, 0.75rem));
+  border: 1px solid var(--glass-border, var(--agy-rule));
+  background: var(--glass, var(--agy-card));
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  backdrop-filter: blur(20px) saturate(1.6);
   color: var(--agy-ink);
-  border: 1px solid var(--agy-accent);
-  font-size: 11px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  pointer-events: none;
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight, transparent),
+    var(--glass-shadow, 0 6px 16px -2px rgba(0, 0, 0, 0.28), 0 2px 6px -1px rgba(0, 0, 0, 0.18));
+  transition:
+    opacity 300ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@starting-style {
+  .agy-toast {
+    opacity: 0;
+    transform: translateY(150%);
+  }
+}
+
+.agy-toast[data-ending] {
+  opacity: 0;
+  transform: translateY(150%);
 }
 
 .agy-toast.error {
-  border-color: var(--agy-bad);
-  color: var(--agy-bad);
+  border-color: color-mix(in srgb, var(--agy-bad) 60%, var(--glass-border, var(--agy-rule)));
+}
+
+.agy-toast-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agy-toast-title {
+  font-weight: var(--font-weight-medium, 500);
+}
+
+.agy-toast-description {
+  color: var(--secondary-foreground, var(--agy-ink-soft));
+  line-height: 1.375;
+  white-space: pre-line;
+}
+
+.agy-toast-close {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--secondary-foreground, var(--agy-ink-soft));
+  line-height: 0;
+  cursor: pointer;
+  transition: color var(--agy-dur) var(--agy-ease);
+}
+
+.agy-toast-close:hover {
+  color: var(--agy-ink);
+}
+
+/* The message is announced from here: the toast itself holds the close button, which a live region would read out. */
+.agy-toast-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agy-toast {
+    transition-property: opacity;
+  }
+
+  @starting-style {
+    .agy-toast {
+      transform: none;
+    }
+  }
+
+  .agy-toast[data-ending] {
+    transform: none;
+  }
 }
 
 .agy-consent-bar {
