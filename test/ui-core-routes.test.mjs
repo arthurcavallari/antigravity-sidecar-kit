@@ -401,9 +401,20 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     await domWin.AgyShell.notifyAgent('hello from direct iframe');
     assert.equal(captured[0].init.headers['X-Sidecar-Token'], 'direct-tok-777');
 
+    // KIT-04: notifyAgent awaits window.sidecar.getWorkspaceUris() when on a _new pane
+    domWin.sidecar = {
+      conversationId: '_new',
+      getWorkspaceUris: async () => ['file:///workspace/from-bridge'],
+    };
+    await domWin.AgyShell.notifyAgent('hello from _new pane', '_new', 'Alert');
+    const newBody = JSON.parse(captured[1].init.body);
+    assert.equal(newBody.conversationId, '_new');
+    assert.equal(newBody.workspace, 'file:///workspace/from-bridge');
+    delete domWin.sidecar;
+
     const iframeUi = attachAgyUI(domWin);
     await iframeUi.apiCall('/api/mutate', { a: 1 });
-    assert.equal(captured[1].init.headers['X-Sidecar-Token'], 'direct-tok-777');
+    assert.equal(captured[2].init.headers['X-Sidecar-Token'], 'direct-tok-777');
 
     assert.equal(enforceSidecarToken({ headers: { 'X-Sidecar-Token': ['direct-tok-777'] } }, 'direct-tok-777'), true);
     assert.equal(enforceSidecarToken({ req: { url: '/page?token=direct-tok-777', headers: {} } }, 'direct-tok-777'), true);

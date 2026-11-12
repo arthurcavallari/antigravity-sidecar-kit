@@ -133,6 +133,19 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
         opts: { projectId: 'proj-99' },
       });
 
+      // KIT-04: _new + workspace invokes agentapi new-conversation (no --workspace flag)
+      const newRes = await syncAgentApi.handleNotify({
+        conversationId: '_new',
+        workspace: 'file:///workspace/demo',
+        title: 'Fresh Thread',
+        message: 'Start fresh diagnostics',
+      });
+      assert.equal(newRes.ok, true);
+      assert.deepEqual(apiCalls.at(-1), {
+        args: ['new-conversation', '--title', 'Fresh Thread', 'Start fresh diagnostics'],
+        opts: { projectId: '', workspace: 'file:///workspace/demo' },
+      });
+
       // /mcp JSON-RPC 2.0 protocol
       const initRes = await sync.handleMcp({ jsonrpc: '2.0', id: 1, method: 'initialize' });
       assert.equal(initRes.result.serverInfo.name, 'test-sync');
@@ -283,7 +296,7 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
     );
   });
 
-  it('isStandaloneAgentApiBinary distinguishes agentapi(.exe) from agy/antigravity wrapper and handleNotify falls back to start-conversation', async () => {
+  it('isStandaloneAgentApiBinary distinguishes agentapi(.exe) from agy/antigravity wrapper and handleNotify falls back to new-conversation', async () => {
     assert.equal(isStandaloneAgentApiBinary('C:\\Users\\arthu\\bin\\agentapi.exe'), true);
     assert.equal(isStandaloneAgentApiBinary('/usr/local/bin/agentapi'), true);
     assert.equal(isStandaloneAgentApiBinary('C:\\Program Files\\Antigravity\\agy.exe'), false);
@@ -317,7 +330,7 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
         message: 'Start fresh',
       });
       assert.equal(resNew.ok, true);
-      assert.deepEqual(fallbackCalls[0], ['start-conversation', '--workspace', '/tmp/ws', 'Start fresh']);
+      assert.deepEqual(fallbackCalls[0], ['new-conversation', '--title', 'Sidecar State', 'Start fresh']);
 
       const resExpired = await sync.handleNotify({
         conversationId: 'conv-expired',
@@ -325,7 +338,7 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
         message: 'Recover expired',
       });
       assert.equal(resExpired.ok, true);
-      assert.deepEqual(fallbackCalls.at(-1), ['start-conversation', '--workspace', '/tmp/ws', 'Recover expired']);
+      assert.deepEqual(fallbackCalls.at(-1), ['new-conversation', '--title', 'Sidecar State', 'Recover expired']);
     } finally {
       sync.dispose();
     }
