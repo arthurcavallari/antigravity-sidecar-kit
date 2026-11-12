@@ -208,6 +208,22 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       });
       assert.deepEqual(sidecarOwnCfg, { lsAddress: '127.0.0.1:4444', csrfToken: 'own-sidecar-token' });
 
+      // KIT-09: 2-level <plugin>/<sidecar>/data/runtime.json and ANTIGRAVITY_EXECUTABLE_DATA_DIR
+      const execDir = join(dir, 'custom-exec-data');
+      persistSidecarRuntime('agy-plugin-porter/cockpit', {
+        env: {
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: execDir,
+          ANTIGRAVITY_SIDECAR_WEB_PORT: '53821',
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:7777',
+          ANTIGRAVITY_CSRF_TOKEN: 'plugin-tok-7777',
+        },
+      });
+      const twoLevelCfg = getLsConfig({
+        sidecarId: 'agy-plugin-porter--cockpit',
+        env: { ANTIGRAVITY_EXECUTABLE_DATA_DIR: execDir },
+      });
+      assert.deepEqual(twoLevelCfg, { lsAddress: '127.0.0.1:7777', csrfToken: 'plugin-tok-7777' });
+
       if (process.platform === 'win32') {
         t.diagnostic('POSIX file modes not applicable on Windows');
         return;
