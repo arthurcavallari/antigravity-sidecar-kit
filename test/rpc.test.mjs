@@ -239,7 +239,10 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
     assert.equal(logsRes.logs, 'line 1\nline 2\n');
     await rpcMod.getSidecarEvents('hangar', opts);
     await rpcMod.listSidecarLogFiles('hangar', opts);
-    await rpcMod.resolveSidecarConfig('C:/sidecar/sidecar.json', opts);
+    await rpcMod.resolveSidecarConfig('hangar', {
+      ...opts,
+      argumentValues: { LOG_LEVEL: 'debug' },
+    });
     assert.ok(calls[4].url.endsWith('/GetSidecarLogs'));
     assert.equal(calls[4].init.headers['Content-Type'], 'application/connect+json');
     assert.equal(calls[4].init.headers['Connect-Protocol-Version'], '1');
@@ -252,6 +255,10 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
     assert.ok(calls[5].url.endsWith('/GetSidecarEvents'));
     assert.ok(calls[6].url.endsWith('/ListSidecarLogFiles'));
     assert.ok(calls[7].url.endsWith('/ResolveSidecarConfig'));
+    assert.deepEqual(JSON.parse(calls[7].init.body), {
+      sidecarId: 'hangar',
+      argumentValues: { LOG_LEVEL: 'debug' },
+    });
 
     await assert.rejects(
       () =>
