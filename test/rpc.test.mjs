@@ -221,19 +221,57 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
     });
 
     const rpcMod = await import('../lib/rpc.mjs');
-    await rpcMod.getSidecarLogs('hangar', { ...opts, logFileName: 'sidecar.log', maxLines: 50 });
+    const streamMockFetch = async (url, init) => {
+      calls.push({ url, init });
+      const bodyFrames = rpcMod.encodeConnectFrame({ logs: 'line 1\nline 2\n' }, 0);
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => bodyFrames.buffer.slice(bodyFrames.byteOffset, bodyFrames.byteOffset + bodyFrames.byteLength),
+      };
+    };
+    const logsRes = await rpcMod.getSidecarLogs('hangar', {
+      ...opts,
+      fetchFn: streamMockFetch,
+      logFileName: 'sidecar.log',
+      maxLines: 50,
+    });
+    assert.equal(logsRes.logs, 'line 1\nline 2\n');
     await rpcMod.getSidecarEvents('hangar', opts);
     await rpcMod.listSidecarLogFiles('hangar', opts);
     await rpcMod.resolveSidecarConfig('C:/sidecar/sidecar.json', opts);
     assert.ok(calls[4].url.endsWith('/GetSidecarLogs'));
-    assert.deepEqual(JSON.parse(calls[4].init.body), {
+    assert.equal(calls[4].init.headers['Content-Type'], 'application/connect+json');
+    assert.equal(calls[4].init.headers['Connect-Protocol-Version'], '1');
+    const decodedLogReq = rpcMod.parseConnectFrames(calls[4].init.body).frames[0];
+    assert.deepEqual(decodedLogReq.data, {
       sidecarId: 'hangar',
-      logFileName: 'sidecar.log',
-      maxLines: 50,
+      logFilename: 'sidecar.log',
+      tailLines: 50,
     });
     assert.ok(calls[5].url.endsWith('/GetSidecarEvents'));
     assert.ok(calls[6].url.endsWith('/ListSidecarLogFiles'));
     assert.ok(calls[7].url.endsWith('/ResolveSidecarConfig'));
+
+    await assert.rejects(
+      () =>
+        rpcMod.getSidecarLogs('hangar', {
+          lsAddress: '127.0.0.1:50000',
+          csrfToken: 'tok-1',
+          fetchFn: async () => {
+            const errFrame = rpcMod.encodeConnectFrame(
+              { error: { code: 'invalid_argument', message: 'unknown sidecar' } },
+              0x02
+            );
+            return {
+              ok: true,
+              status: 200,
+              arrayBuffer: async () => errFrame.buffer.slice(errFrame.byteOffset, errFrame.byteOffset + errFrame.byteLength),
+            };
+          },
+        }),
+      /LanguageServerService\/GetSidecarLogs failed: unknown sidecar/
+    );
 
     await assert.rejects(
       () =>
