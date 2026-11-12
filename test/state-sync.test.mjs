@@ -146,9 +146,27 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
         opts: { projectId: '', workspace: 'file:///workspace/demo' },
       });
 
-      // /mcp JSON-RPC 2.0 protocol
-      const initRes = await sync.handleMcp({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+      // /mcp JSON-RPC 2.0 protocol (2024-11-05 + 2026-07-28 server/discover & stateless lists)
+      const discoverRes = await sync.handleMcp({
+        jsonrpc: '2.0',
+        id: 100,
+        method: 'server/discover',
+        params: { supportedVersions: ['2026-07-28', '2024-11-05'] },
+      });
+      assert.equal(discoverRes.result.protocolVersion, '2026-07-28');
+      assert.equal(discoverRes.result.resultType, 'complete');
+      assert.equal(discoverRes.result._meta['io.modelcontextprotocol/serverInfo'].name, 'test-sync');
+
+      const initRes = await sync.handleMcp({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2026-07-28' } });
       assert.equal(initRes.result.serverInfo.name, 'test-sync');
+      assert.equal(initRes.result.protocolVersion, '2026-07-28');
+
+      const promptsRes = await sync.handleMcp({ jsonrpc: '2.0', id: 101, method: 'prompts/list' });
+      assert.deepEqual(promptsRes.result, { prompts: [] });
+      const resourcesRes = await sync.handleMcp({ jsonrpc: '2.0', id: 102, method: 'resources/list' });
+      assert.deepEqual(resourcesRes.result, { resources: [] });
+      const subRes = await sync.handleMcp({ jsonrpc: '2.0', id: 103, method: 'subscriptions/listen' });
+      assert.deepEqual(subRes.result, {});
 
       const listRes = await sync.handleMcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
       assert.equal(listRes.result.tools.length, 2);
