@@ -201,6 +201,42 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       const cfgAfterUninst = readJsonSafe(configJsonPath, {});
       assert.equal(cfgAfterUninst.sidecars['my-custom-tool'].enabled, false);
       assert.equal(cfgAfterUninst.sidecars['my-custom-tool'].projectId, 'keep-this-project-id');
+
+      // KIT-06: ManageSidecar(ENABLE) returning "project name already exists" must treat sidecar as registered without SIGTERMing PID
+      const rpcCalls = [];
+      let firstRestart = true;
+      const reEnableRes = await runSidecarSetup({
+        sidecarId: 'my-custom-tool',
+        repoRoot: scaffoldDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+        execFn: () => assert.fail('must not fall through to process kill when project name already exists'),
+        rpcOptions: {
+          lsAddress: '127.0.0.1:50500',
+          csrfToken: 'tok-ls',
+          sidecarDataRoot: join(dir, 'sidecar_data'),
+          fetchFn: async (url, init) => {
+            const method = url.split('/').pop();
+            const body = JSON.parse(init.body || '{}');
+            rpcCalls.push({ method, body });
+            if (method === 'ManageSidecar' && body.action === 'SIDECAR_ACTION_RESTART' && firstRestart) {
+              firstRestart = false;
+              return { ok: false, status: 400, text: async () => JSON.stringify({ message: 'sidecar disabled' }) };
+            }
+            if (method === 'ManageSidecar' && body.action === 'SIDECAR_ACTION_ENABLE') {
+              return { ok: false, status: 500, text: async () => JSON.stringify({ message: 'project name already exists' }) };
+            }
+            return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) };
+          },
+        },
+      });
+      assert.equal(reEnableRes.rpcRes.notified, true);
+      assert.equal(reEnableRes.rpcRes.alreadyRegistered, true);
+      assert.equal(rpcCalls.length, 3);
+      assert.equal(rpcCalls[2].body.action, 'SIDECAR_ACTION_RESTART');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
