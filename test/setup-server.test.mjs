@@ -587,6 +587,16 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       const preloadText = await preloadRes.text();
       assert.ok(preloadText.length > 0);
 
+      // KIT-08: resolvePreloadJs honors ANTIGRAVITY_PATH and FALLBACK_PRELOAD_JS wires UI/workspace/key postMessage
+      const fakeAgy = join(dir, 'custom-agy-install');
+      mkdirSync(join(fakeAgy, 'lib', 'node_modules', 'sidecar_sdk'), { recursive: true });
+      writeFileSync(join(fakeAgy, 'lib', 'node_modules', 'sidecar_sdk', 'preload.js'), '/* AGY_PATH_HIT */\n', 'utf8');
+      assert.match(srvMod.resolvePreloadJs({ ANTIGRAVITY_PATH: fakeAgy, USERPROFILE: dir, HOME: dir }), /AGY_PATH_HIT/);
+      assert.match(srvMod.FALLBACK_PRELOAD_JS, /toggle-conversation/);
+      assert.match(srvMod.FALLBACK_PRELOAD_JS, /add-artifact-comment/);
+      assert.match(srvMod.FALLBACK_PRELOAD_JS, /sidecar-key-event/);
+      assert.match(srvMod.FALLBACK_PRELOAD_JS, /workspace-change/);
+
       const evilPageRes = await fetch(`${base}/`, { headers: { Origin: 'https://evil.example' } });
       assert.equal(evilPageRes.status, 403);
 
