@@ -434,5 +434,23 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.deepEqual(JSON.parse(JSON.stringify(forwardedToParent)), [
       { msg: { type: 'agy:shortcut-forwarded', dir: -1, repeat: false }, targetOrigin: '*' },
     ]);
+
+    // KIT-12: In native Antigravity Aux Pane (top-level iframe on plugin://, window.parent === window.top),
+    // tab-cycle chords must NOT stopPropagation so preload.js on window emits sidecar-key-event
+    const nativeWindowBubbled = [];
+    domWin.top = domWin.parent;
+    domWin.location = {
+      href: 'plugin://context-monitor-52000/?token=direct-tok-777',
+      search: '?token=direct-tok-777',
+      protocol: 'plugin:',
+    };
+    domWin.addEventListener('keydown', (e) => {
+      nativeWindowBubbled.push({ key: e.key, defaultPrevented: e.defaultPrevented });
+    });
+    domDoc.documentElement.dispatchEvent(
+      new domWin.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, shiftKey: false, bubbles: true, cancelable: true })
+    );
+    assert.equal(forwardedToParent.length, 1, 'native Aux Pane must not intercept with agy:shortcut-forwarded');
+    assert.deepEqual(nativeWindowBubbled, [{ key: 'Tab', defaultPrevented: false }]);
   });
 });
