@@ -300,6 +300,29 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       argumentValues: { LOG_LEVEL: 'debug' },
     });
 
+    // KIT-10: getTrajectorySummaries merges multi-frame JetboxSubscribeToSummaries updates
+    const batchA = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`c-${i}`, { summary: `S${i}` }]));
+    const batchB = { 'c-100': { summary: 'S100' } };
+    const sumOut = await rpcMod.getTrajectorySummaries({
+      ...opts,
+      fetchFn: async (url, init) => {
+        calls.push({ url, init });
+        const joined = Buffer.concat([
+          rpcMod.encodeConnectFrame({ updates: batchA, deletes: [] }, 0),
+          rpcMod.encodeConnectFrame({ updates: batchB, deletes: ['c-0'] }, 0),
+        ]);
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => joined.buffer.slice(joined.byteOffset, joined.byteOffset + joined.byteLength),
+        };
+      },
+    });
+    assert.ok(calls[8].url.endsWith('/JetboxSubscribeToSummaries'));
+    assert.equal(Object.keys(sumOut.trajectorySummaries).length, 100);
+    assert.equal(sumOut.trajectorySummaries['c-0'], undefined);
+    assert.equal(sumOut.trajectorySummaries['c-100'].summary, 'S100');
+
     await assert.rejects(
       () =>
         rpcMod.getSidecarLogs('hangar', {
