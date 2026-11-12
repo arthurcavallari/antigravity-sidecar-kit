@@ -12,6 +12,7 @@ import {
   computeRelativeLuminance,
   fetchHostStylesheet,
   parseCssColor,
+  readHostFontSize,
   readHostThemePreset,
   resolveHostTheme,
 } from '../lib/theme.mjs';
@@ -435,5 +436,45 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
     assert.equal(attrs.get('data-theme'), 'dark');
     assert.equal(styleProps.has('--onyx-well'), false);
     assert.equal(styleProps.has('--onyx-key'), false);
+
+    // Font scale from resolveHostTheme persists when subsequent host theme-change omits --app-font-scale
+    observerDeliveries = 0;
+    sandbox.window.AgyShell.applyAgyThemeFromPayload({
+      theme: 'Onyx Dark',
+      themeType: 'dark',
+      fontScale: 1.142857,
+      cssVariables: { '--background': '#070709', '--foreground': '#FFFFFF' },
+    });
+    assert.equal(styleProps.get('--app-font-scale'), '1.142857');
+    observerDeliveries = 0;
+    sandbox.window.AgyShell.applyAgyThemeFromPayload({
+      theme: 'Onyx Dark',
+      themeType: 'dark',
+      cssVariables: { '--background': '#070709', '--foreground': '#FFFFFF' },
+    });
+    assert.equal(styleProps.get('--app-font-scale'), '1.142857');
+  });
+
+  it('reads jetski.fontSize from app_storage.json and emits --app-font-scale and 2.31 --text-* variables [KIT-14]', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-font-scale-'));
+    try {
+      const storagePath = join(dir, 'app_storage.json');
+      writeJsonNoBom(storagePath, { 'jetski.fontSize': 16, 'theme-preset-dark': 'Onyx Dark' });
+      const fsInfo = readHostFontSize(storagePath);
+      assert.equal(fsInfo.fontSizePx, 16);
+      assert.equal(fsInfo.fontScale, +(16 / 14).toFixed(6));
+
+      const resolved = resolveHostTheme({ themeMode: 'THEME_MODE_DARK' }, storagePath);
+      assert.equal(resolved.fontSizePx, 16);
+      assert.equal(resolved.cssVariables['--app-font-scale'], String(+(16 / 14).toFixed(6)));
+      assert.equal(resolved.cssVariables['--font-size'], '16px');
+      assert.equal(resolved.cssVariables['--text-compact'], 'calc(0.875rem * var(--app-font-scale, 1) - 0.0625rem)');
+      assert.equal(resolved.cssVariables['--text-base'], 'calc(0.875rem * var(--app-font-scale, 1))');
+
+      writeJsonNoBom(storagePath, { 'jetski.fontSize': 'small' });
+      assert.equal(readHostFontSize(storagePath).fontSizePx, 12);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
