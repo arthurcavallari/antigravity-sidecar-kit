@@ -14,6 +14,11 @@ describe('antigravity-sidecar-kit CLI', () => {
   it('exposes a bin named after the package so `npx antigravity-sidecar-kit` resolves', () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
     assert.equal(pkg.bin[pkg.name], 'bin/cli.mjs');
+    const wrapperPkg = JSON.parse(
+      readFileSync(join(ROOT, 'packages', 'create-antigravity-sidecar', 'package.json'), 'utf8')
+    );
+    assert.equal(wrapperPkg.dependencies['antigravity-sidecar-kit'], `^${pkg.version}`);
+    assert.equal(existsSync(join(ROOT, 'package-lock.json')), true);
   });
 
   it('prints usage and exits 0 for --help, exits 1 without a name', () => {

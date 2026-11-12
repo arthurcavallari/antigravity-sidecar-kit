@@ -1,6 +1,6 @@
 {
   "name": "create-antigravity-sidecar",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "description": "npm create antigravity-sidecar: scaffold a Google Antigravity Auxiliary Pane sidecar (thin wrapper around antigravity-sidecar-kit).",
   "license": "MIT",
@@ -30,7 +30,7 @@
     "create-antigravity-sidecar": "bin/cli.mjs"
   },
   "dependencies": {
-    "antigravity-sidecar-kit": "^1.4.0"
+    "antigravity-sidecar-kit": "^1.8.0"
   },
   "keywords": [
     "create",
