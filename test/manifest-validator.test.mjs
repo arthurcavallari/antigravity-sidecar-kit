@@ -379,6 +379,40 @@ describe('manifest-validator', () => {
       } finally {
         rmSync(rulesDir, { recursive: true, force: true });
       }
+
+      // KIT-11: VAR-HOOK-01 (${PLUGIN_ROOT} in hooks.json command) and MCP-NAME-01 (64-char MCP tool budget)
+      const kit11Dir = mkdtempSync(join(tmpdir(), 'kit-lint-kit11-'));
+      try {
+        writeFileSync(join(kit11Dir, 'plugin.json'), JSON.stringify({ name: 'acme-long-plugin-suite', version: '1.0.0' }));
+        mkdirSync(join(kit11Dir, 'scripts'), { recursive: true });
+        writeFileSync(join(kit11Dir, 'scripts', 'hook.mjs'), 'export {};\n');
+        writeFileSync(
+          join(kit11Dir, 'hooks.json'),
+          JSON.stringify({
+            hooks: {
+              PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'node ${PLUGIN_ROOT}/scripts/hook.mjs' }] }],
+            },
+          })
+        );
+        writeFileSync(
+          join(kit11Dir, 'mcp_config.json'),
+          JSON.stringify({
+            mcpServers: {
+              'acme-long-plugin-suite_audit-engine': { command: 'node', args: ['${PLUGIN_ROOT}/scripts/hook.mjs'] },
+            },
+          })
+        );
+        const check11 = lintPluginOrSidecar(kit11Dir, { fix: false });
+        const warn11 = check11.warnings.map((w) => w.ruleId);
+        assert.ok(warn11.includes('VAR-HOOK-01'));
+        assert.ok(warn11.includes('MCP-NAME-01'));
+
+        lintPluginOrSidecar(kit11Dir, { fix: true });
+        const fixedHookCmd = JSON.parse(readFileSync(join(kit11Dir, 'hooks.json'), 'utf8')).hooks.PreToolUse[0].hooks[0].command;
+        assert.equal(fixedHookCmd, 'node ./scripts/hook.mjs');
+      } finally {
+        rmSync(kit11Dir, { recursive: true, force: true });
+      }
     });
   });
 });

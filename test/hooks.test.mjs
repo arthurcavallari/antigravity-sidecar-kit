@@ -105,6 +105,30 @@ test('normalizeHookEnvelope normalizes Antigravity call_mcp_tool, Claude Code, C
   assert.equal(claude.mcpToolName, 'create_customer');
   assert.deepEqual(claude.toolInput, { email: 'a@b.com' });
   assert.deepEqual(claude.toolResponse, { id: 'cus_123' });
+
+  // KIT-11: Antigravity 2.31.0+ eager single-underscore mcp_<server>_<tool> and plugin-prefixed mcp_<plugin>_<server>_<tool>
+  const agyEager = normalizeHookEnvelope({
+    conversationId: 'conv-eager-1',
+    toolCall: {
+      name: 'mcp_github_list_pull_requests',
+      args: { state: 'open' },
+    },
+  });
+  assert.equal(agyEager.mcpServerName, 'github');
+  assert.equal(agyEager.mcpToolName, 'list_pull_requests');
+
+  const agyPluginEager = normalizeHookEnvelope(
+    {
+      conversationId: 'conv-eager-2',
+      toolCall: {
+        name: 'mcp_my-plugin_ui_render_widget',
+        args: { id: 'w1' },
+      },
+    },
+    { PLUGIN_NAME: 'my-plugin' }
+  );
+  assert.equal(agyPluginEager.mcpServerName, 'ui');
+  assert.equal(agyPluginEager.mcpToolName, 'render_widget');
 });
 
 test('normalizeHookEnvelope maps all lifecycle event aliases and env fallbacks', () => {
