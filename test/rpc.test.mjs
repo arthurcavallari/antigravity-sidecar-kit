@@ -184,6 +184,30 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       const unknown = getLsConfig({ sidecarDataRoot: dir, env: { ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:3333' } });
       assert.equal(unknown.csrfToken, '');
 
+      // KIT-03: In ANTIGRAVITY_AGENT=1 run_command shells, prefer sidecar runtime.json credentials
+      const agentCfg = getLsConfig({
+        sidecarDataRoot: dir,
+        sidecarId: 'b',
+        env: {
+          ANTIGRAVITY_AGENT: '1',
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:9999',
+          ANTIGRAVITY_CSRF_TOKEN: 'run-command-restricted-token',
+        },
+      });
+      assert.deepEqual(agentCfg, { lsAddress: '127.0.0.1:2222', csrfToken: 'token-for-2222' });
+
+      // Sidecar processes themselves (with ANTIGRAVITY_SIDECAR_WEB_PORT set) still honor their own env
+      const sidecarOwnCfg = getLsConfig({
+        sidecarDataRoot: dir,
+        env: {
+          ANTIGRAVITY_AGENT: '1',
+          ANTIGRAVITY_SIDECAR_WEB_PORT: '55000',
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:4444',
+          ANTIGRAVITY_CSRF_TOKEN: 'own-sidecar-token',
+        },
+      });
+      assert.deepEqual(sidecarOwnCfg, { lsAddress: '127.0.0.1:4444', csrfToken: 'own-sidecar-token' });
+
       if (process.platform === 'win32') {
         t.diagnostic('POSIX file modes not applicable on Windows');
         return;
