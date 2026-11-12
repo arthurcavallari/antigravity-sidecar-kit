@@ -290,6 +290,15 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
       assert.equal(resValid.status, 200);
       ac.abort();
 
+      // KIT-07: plugin:// custom Electron scheme origin is permitted when token is valid
+      const acPlugin = new AbortController();
+      const resPluginOrigin = await fetch(`http://127.0.0.1:${port}/api/events?token=secret-token-123`, {
+        headers: { Origin: 'plugin://agy-plugin-porter--porter-cockpit-53821' },
+        signal: acPlugin.signal,
+      });
+      assert.equal(resPluginOrigin.status, 200);
+      acPlugin.abort();
+
       assert.equal(verifySidecarToken('secret-token-123', 'secret-token-123'), true);
       assert.equal(verifySidecarToken('short', 'secret-token-123'), false);
     } finally {
