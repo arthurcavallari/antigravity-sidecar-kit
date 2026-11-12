@@ -50,8 +50,8 @@
 
 [data-theme='dark'] {
   color-scheme: dark;
-  --agy-ink: var(--foreground, #cccccc);
-  --agy-canvas: var(--background, #101010);
+  --agy-ink: var(--foreground, #FFFFFF);
+  --agy-canvas: var(--background, #070708);
   --agy-ink-soft: color-mix(in srgb, var(--agy-ink) 88%, var(--agy-canvas));
   --agy-ink-faint: var(--muted-foreground, color-mix(in srgb, var(--agy-ink) 65%, var(--agy-canvas)));
   --agy-sunken: var(--muted, color-mix(in srgb, var(--agy-ink) 4%, var(--agy-canvas)));
@@ -63,7 +63,7 @@
   --agy-card-edge-hover: rgba(255, 255, 255, 0.2);
   --agy-paper: var(--agy-card);
   --agy-raised: var(--agy-card);
-  --agy-accent: var(--primary, #007acc);
+  --agy-accent: var(--primary, #2F71E3);
   --agy-accent-ink: color-mix(in srgb, var(--agy-accent) 60%, var(--agy-ink));
   --agy-accent-soft: color-mix(in srgb, var(--agy-accent) 16%, transparent);
   --nux-focus-ring: color-mix(in srgb, var(--agy-accent) 55%, transparent);
@@ -102,9 +102,9 @@
 }
 
 [data-follow-host][data-theme='dark'] {
-  --agy-ink: var(--foreground, #cccccc);
-  --agy-canvas: var(--background, #101010);
-  --agy-accent: var(--primary, #007acc);
+  --agy-ink: var(--foreground, #FFFFFF);
+  --agy-canvas: var(--background, #070708);
+  --agy-accent: var(--primary, #2F71E3);
   --agy-card: var(--card, color-mix(in srgb, var(--agy-ink) 5%, var(--agy-canvas)));
   --agy-raised: var(--agy-card);
   --agy-ink-soft: color-mix(in srgb, var(--agy-ink) 88%, var(--agy-canvas));

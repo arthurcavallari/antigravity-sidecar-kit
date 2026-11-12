@@ -50,11 +50,12 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
 
     const dark = resolveHostTheme({ themeMode: 2 });
     assert.ok(dark.luminance < 0.02);
-    assert.equal(dark.cssVariables['--agy-ink-soft'], 'color-mix(in srgb, #ffffff 88%, #181818)');
-    assert.equal(dark.cssVariables['--agy-canvas'], '#181818');
+    assert.equal(dark.theme, 'Onyx Dark');
+    assert.equal(dark.cssVariables['--agy-ink-soft'], 'color-mix(in srgb, #FFFFFF 88%, #070708)');
+    assert.equal(dark.cssVariables['--agy-canvas'], '#070708');
     assert.equal(dark.cssVariables['--link'], '#6a9fcb');
-    assert.equal(dark.cssVariables['--shell'], '#181818');
-    assert.equal(dark.cssVariables['--cta'], '#007acc');
+    assert.equal(dark.cssVariables['--shell'], '#111114');
+    assert.equal(dark.cssVariables['--cta'], '#2F71E3');
   });
 
   it('resolves both Hangar cssVariables and Context Monitor vars across dark, light, and high-contrast modes', () => {
@@ -62,12 +63,18 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
     assert.equal(darkDefault.mode, 'dark');
     assert.equal(darkDefault.themeType, 'dark');
     assert.equal(darkDefault.contrast, 'normal');
-    assert.equal(darkDefault.vars['--cm-bg'], '#181818');
-    assert.equal(darkDefault.vars['--cm-text'], '#ffffff');
-    assert.equal(darkDefault.vars['--cm-card'], 'color-mix(in srgb, #ffffff 5%, #181818)');
-    assert.equal(darkDefault.vars['--cm-border'], 'color-mix(in srgb, #ffffff 5%, transparent)');
-    assert.equal(darkDefault.vars['--cm-hover'], 'rgba(255, 255, 255, 0.05)');
-    assert.equal(darkDefault.cssVariables['--background'], '#181818');
+    assert.equal(darkDefault.theme, 'Onyx Dark');
+    assert.equal(darkDefault.vars['--cm-bg'], '#070708');
+    assert.equal(darkDefault.vars['--cm-text'], '#FFFFFF');
+    assert.equal(darkDefault.vars['--cm-accent'], '#2F71E3');
+    assert.equal(darkDefault.cssVariables['--background'], '#070708');
+    assert.equal(darkDefault.cssVariables['--primary'], '#2F71E3');
+    assert.equal(darkDefault.cssVariables['--card'], '#131317');
+
+    const legacyDark = resolveHostTheme({ themeMode: 2, preset: 'Legacy Dark' });
+    assert.equal(legacyDark.theme, 'Legacy Dark');
+    assert.equal(legacyDark.cssVariables['--background'], '#101010');
+    assert.equal(legacyDark.cssVariables['--primary'], '#007acc');
 
     const dir = mkdtempSync(join(tmpdir(), 'kit-theme-test-'));
     try {
@@ -453,6 +460,15 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
       cssVariables: { '--background': '#070709', '--foreground': '#FFFFFF' },
     });
     assert.equal(styleProps.get('--app-font-scale'), '1.142857');
+
+    // 2.30+ Onyx Dark #070708 background without explicit label matches isOnyxPayload [KIT-15]
+    observerDeliveries = 0;
+    sandbox.window.AgyShell.applyAgyThemeFromPayload({
+      themeType: 'dark',
+      cssVariables: { '--background': '#070708', '--foreground': '#FFFFFF' },
+    });
+    assert.equal(styleProps.get('--onyx-well'), '#111115');
+    assert.equal(styleProps.get('--onyx-key'), '#24252A');
   });
 
   it('reads jetski.fontSize from app_storage.json and emits --app-font-scale and 2.31 --text-* variables [KIT-14]', () => {
