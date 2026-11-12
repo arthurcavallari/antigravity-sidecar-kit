@@ -536,4 +536,270 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
       rmSync(tmpBrain, { recursive: true, force: true });
     }
   });
+
+  it('startStdioMcpBridge forwards to live HTTP /mcp with token, suppresses notification replies, handles ping, blocks SSRF, and falls back offline cleanly', async () => {
+    const { PassThrough } = await import('node:stream');
+    const stateMod = await import('../lib/state-sync.mjs');
+    const { StandaloneSidecarApp } = await import('../lib/server.mjs');
+    assert.equal(typeof stateMod.startStdioMcpBridge, 'function');
+
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'kit-mcp-bridge-'));
+    const tmpBrain = mkdtempSync(join(tmpdir(), 'kit-mcp-brain-'));
+    const toolDefs = [
+      {
+        name: 'add_item',
+        description: 'Appends an item to state',
+        inputSchema: { type: 'object', properties: { label: { type: 'string' } } },
+        handler: async (args, { currentState }) => {
+          const items = [...(currentState.items || []), String(args.label || 'item')];
+          const count = (Number(currentState.count) || 0) + 1;
+          return { patch: { items, count }, result: { ok: true, count, items } };
+        },
+      },
+    ];
+
+    let app = new StandaloneSidecarApp({ port: 0, uiToken: 'mcp-bridge-tok' });
+    let sync = registerStateSyncRoutes(app, {
+      sidecarId: 'bridge-sc',
+      dataRoot: tmpRoot,
+      initialState: { items: [], count: 0 },
+      mcpTools: toolDefs,
+    });
+    let bridge = null;
+    const sseAbort = new AbortController();
+
+    try {
+      const server = await app.run();
+      const port = server.address().port;
+
+      // Connect live SSE listener to confirm stdio MCP mutations broadcast to UI
+      const sseEvents = [];
+      const sseRes = await fetch(`http://127.0.0.1:${port}/api/events?token=mcp-bridge-tok`, {
+        signal: sseAbort.signal,
+      });
+      assert.equal(sseRes.status, 200);
+      const sseReader = sseRes.body.getReader();
+      const dec = new TextDecoder();
+      let sseBuf = '';
+      const pumpSse = (async () => {
+        try {
+          while (true) {
+            const { value, done } = await sseReader.read();
+            if (done) break;
+            sseBuf += dec.decode(value, { stream: true });
+            let idx;
+            while ((idx = sseBuf.indexOf('\n\n')) !== -1) {
+              const block = sseBuf.slice(0, idx);
+              sseBuf = sseBuf.slice(idx + 2);
+              const dataLine = block.split('\n').find((l) => l.startsWith('data: '));
+              if (dataLine) sseEvents.push(JSON.parse(dataLine.slice(6)));
+            }
+          }
+        } catch {}
+      })();
+
+      const waitUntil = async (pred, timeoutMs = 2000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          if (pred()) return;
+          await new Promise((r) => setTimeout(r, 15));
+        }
+        throw new Error('Timed out waiting for condition');
+      };
+      await waitUntil(() => sseEvents.length >= 1);
+
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const outLines = [];
+      let outBuf = '';
+      output.on('data', (chunk) => {
+        outBuf += chunk.toString('utf8');
+        let idx;
+        while ((idx = outBuf.indexOf('\n')) !== -1) {
+          const line = outBuf.slice(0, idx).trim();
+          outBuf = outBuf.slice(idx + 1);
+          if (line) outLines.push(JSON.parse(line));
+        }
+      });
+
+      bridge = stateMod.startStdioMcpBridge({
+        sidecarId: 'bridge-sc',
+        dataRoot: tmpRoot,
+        initialState: { items: [], count: 0 },
+        mcpTools: toolDefs,
+        forwardTimeoutMs: 400,
+        input,
+        output,
+      });
+
+      // 1. Online: initialize + notification (must emit ZERO reply) + ping + tools/list + tools/call
+      input.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n');
+      input.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+      input.write('{"jsonrpc":"2.0","id":2,"method":"ping"}\n');
+      input.write('{"jsonrpc":"2.0","id":3,"method":"tools/list"}\n');
+      input.write('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"add_item","arguments":{"label":"online-1"}}}\n');
+
+      await waitUntil(() => outLines.length >= 4);
+      assert.equal(outLines.length, 4, 'notifications/initialized must NOT emit a stdout response line');
+      assert.equal(outLines[0].id, 1);
+      assert.ok(outLines[0].result.protocolVersion);
+      assert.deepEqual(outLines[1], { jsonrpc: '2.0', id: 2, result: {} });
+      assert.equal(outLines[2].id, 3);
+      assert.ok(outLines[2].result.tools.some((t) => t.name === 'get_state'));
+      assert.ok(outLines[2].result.tools.some((t) => t.name === 'add_item'));
+      assert.equal(outLines[3].id, 4);
+      assert.deepEqual(outLines[3].result.structuredContent, { ok: true, count: 1, items: ['online-1'] });
+
+      // Live StateSync and SSE client must reflect the forwarded MCP tool mutation
+      assert.deepEqual(sync.getState(), { items: ['online-1'], count: 1 });
+      await waitUntil(() => sseEvents.some((e) => e.count === 1));
+
+      // 2. Stop live server AND plant a stale dead-port server_info.json (simulating SIGKILL crash)
+      sseAbort.abort();
+      await pumpSse;
+      sync.dispose();
+      sync = null;
+      await app.close();
+      app = null;
+
+      writeServerInfo({ sidecarId: 'bridge-sc', dataRoot: tmpRoot, port: 1, token: 'stale-tok' });
+
+      input.write('{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"add_item","arguments":{"label":"offline-2"}}}\n');
+      await waitUntil(() => outLines.length >= 5);
+      assert.equal(outLines[4].id, 5);
+      assert.deepEqual(outLines[4].result.structuredContent, {
+        ok: true,
+        count: 2,
+        items: ['online-1', 'offline-2'],
+      });
+
+      // External disk edit while offline must be picked up on next offline get_state call
+      const diskStatePath = join(tmpRoot, 'bridge-sc', 'state.json');
+      writeFileSync(diskStatePath, JSON.stringify({ items: ['online-1', 'offline-2', 'disk-3'], count: 99 }), 'utf8');
+
+      input.write('{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_state","arguments":{}}}\n');
+      await waitUntil(() => outLines.length >= 6);
+      const offlineState = JSON.parse(outLines[5].result.content[0].text);
+      assert.equal(offlineState.state.count, 99);
+      assert.deepEqual(offlineState.state.items, ['online-1', 'offline-2', 'disk-3']);
+
+      // 3. Malformed JSON line emits -32700 Parse error without crashing subsequent lines
+      input.write('{broken-json\n');
+      input.write('{"jsonrpc":"2.0","id":7,"method":"ping"}\n');
+      await waitUntil(() => outLines.length >= 8);
+      assert.equal(outLines[6].error.code, -32700);
+      assert.equal(outLines[6].id, null);
+      assert.deepEqual(outLines[7], { jsonrpc: '2.0', id: 7, result: {} });
+
+      // 4. SSRF guard: non-loopback host in server_info.json must NEVER call fetchFn
+      let ssrfFetchCalled = false;
+      writeFileSync(
+        join(tmpRoot, 'bridge-sc', 'server_info.json'),
+        JSON.stringify({ host: 'evil.example.com', port: 443, token: 'leaked-secret' }),
+        'utf8'
+      );
+      const ssrfBridge = stateMod.startStdioMcpBridge({
+        sidecarId: 'bridge-sc',
+        dataRoot: tmpRoot,
+        mcpTools: toolDefs,
+        fetchFn: async () => {
+          ssrfFetchCalled = true;
+          throw new Error('SSRF fetch should not be called');
+        },
+        input: new PassThrough(),
+        output: new PassThrough(),
+      });
+      const ssrfReply = await ssrfBridge.routeRequest({ jsonrpc: '2.0', id: 8, method: 'ping' });
+      assert.equal(ssrfFetchCalled, false, 'non-loopback host in server_info.json must be rejected');
+      assert.deepEqual(ssrfReply, { jsonrpc: '2.0', id: 8, result: {} });
+      ssrfBridge.close();
+
+      // 5. Piped batch mode + perConversation offline brainDir persistence
+      const batchIn = new PassThrough();
+      const batchOut = new PassThrough();
+      let batchText = '';
+      batchOut.on('data', (c) => { batchText += c.toString('utf8'); });
+      const convId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const convBridge = stateMod.startStdioMcpBridge({
+        sidecarId: 'scoped-sc',
+        dataRoot: tmpRoot,
+        brainDir: tmpBrain,
+        perConversation: true,
+        initialState: { items: [], count: 0 },
+        mcpTools: toolDefs,
+        input: batchIn,
+        output: batchOut,
+      });
+      batchIn.write(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 9,
+          method: 'tools/call',
+          params: {
+            name: 'add_item',
+            arguments: { label: 'scoped-item' },
+            _meta: { [MCP_CONV_META_KEY]: convId },
+          },
+        }) + '\n'
+      );
+      batchIn.end();
+      await convBridge.closed;
+      const batchParsed = JSON.parse(batchText.trim());
+      assert.equal(batchParsed.id, 9);
+      assert.deepEqual(batchParsed.result.structuredContent, { ok: true, count: 1, items: ['scoped-item'] });
+      const scopedFile = join(tmpBrain, convId, 'scratch', 'sidecars', 'scoped-sc', 'state.json');
+      assert.equal(existsSync(scopedFile), true);
+      assert.deepEqual(JSON.parse(readFileSync(scopedFile, 'utf8')), { items: ['scoped-item'], count: 1 });
+
+      // 6. Offline bridge must NOT fail with Unauthorized when ANTIGRAVITY_SIDECAR_UI_TOKEN is set in process.env,
+      //    supports JSON-RPC batch arrays, and resolves pluginName nested data layout
+      const prevEnvTok = process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+      process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = 'global-env-ui-token';
+      try {
+        const pluginIn = new PassThrough();
+        const pluginOut = new PassThrough();
+        const pluginLines = [];
+        let pBuf = '';
+        pluginOut.on('data', (c) => {
+          pBuf += c.toString('utf8');
+          let idx;
+          while ((idx = pBuf.indexOf('\n')) !== -1) {
+            const l = pBuf.slice(0, idx).trim();
+            pBuf = pBuf.slice(idx + 1);
+            if (l) pluginLines.push(JSON.parse(l));
+          }
+        });
+        const pluginBridge = stateMod.startStdioMcpBridge({
+          pluginName: 'acme-plugin',
+          sidecarId: 'viewer',
+          dataRoot: tmpRoot,
+          initialState: { items: [], count: 0 },
+          mcpTools: toolDefs,
+          input: pluginIn,
+          output: pluginOut,
+        });
+        pluginIn.write('[{"jsonrpc":"2.0","id":10,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"}]\n');
+        pluginIn.write('[]\n');
+        pluginIn.write('{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"add_item","arguments":{"label":"plugin-item"}}}\n');
+        pluginIn.end();
+        await pluginBridge.closed;
+
+        assert.deepEqual(pluginLines[0], [{ jsonrpc: '2.0', id: 10, result: {} }]);
+        assert.equal(pluginLines[1].error.code, -32600);
+        assert.equal(pluginLines[2].id, 11);
+        assert.deepEqual(pluginLines[2].result.structuredContent, { ok: true, count: 1, items: ['plugin-item'] });
+        assert.equal(existsSync(join(tmpRoot, 'acme-plugin', 'viewer', 'data', 'state.json')), true);
+      } finally {
+        if (prevEnvTok === undefined) delete process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+        else process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = prevEnvTok;
+      }
+    } finally {
+      sseAbort.abort();
+      bridge?.close?.();
+      sync?.dispose?.();
+      if (app) await app.close();
+      rmSync(tmpRoot, { recursive: true, force: true });
+      rmSync(tmpBrain, { recursive: true, force: true });
+    }
+  });
 });

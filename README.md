@@ -141,22 +141,49 @@ const theme = resolveHostTheme();
 ---
 
 ### `antigravity-sidecar-kit/server`
-Route handlers for `SidecarApp` (`sidecar_sdk`) that inject `ANTIGRAVITY_SIDECAR_UI_TOKEN` + cache-busting timestamps into local HTML asset references (`src`/`href`) and serve the host Tailwind stylesheet with `instanceof Response` compatibility.
+Route handlers for `SidecarApp` (`sidecar_sdk`) plus `StandaloneSidecarApp` (`createSidecarApp`), a host-free drop-in replacement that boots without `ANTIGRAVITY_LS_ADDRESS` / `ANTIGRAVITY_CSRF_TOKEN` / `ANTIGRAVITY_SIDECAR_WEB_PORT`, authenticates all `app.api(...)` routes (including `GET`), enforces `bodyLimitBytes` (`413`), blocks non-loopback `Origin` headers (`403`), and runs `/_sidecar/*` `agentapi` calls asynchronously.
 
 ```js
-import { SidecarApp, Response } from 'sidecar_sdk';
-import { createAssetHandler, createAgyCssHandler } from 'antigravity-sidecar-kit/server';
+import {
+  createSidecarApp,
+  createAssetHandler,
+  createAgyCssHandler,
+  setupSidecarServer,
+} from 'antigravity-sidecar-kit/server';
 
-const app = new SidecarApp();
-const serveAsset = (rel, type) =>
-  createAssetHandler(UI_DIR, rel, type, { ResponseClass: Response });
-
-app.page('/', serveAsset('index.html', 'text/html; charset=utf-8'));
-app.page('/compiled_tailwind.css', createAgyCssHandler({ ResponseClass: Response }));
-app.page('/styles.css', serveAsset('styles.css', 'text/css; charset=utf-8'));
-app.page('/app.js', serveAsset('app.js', 'text/javascript; charset=utf-8'));
+const app = createSidecarApp(); // works inside Antigravity, standalone browser dev, and node --test
+setupSidecarServer(app, {
+  uiDir: UI_DIR,
+  stateSyncOptions: { sidecarId: 'my-sidecar' },
+});
 
 await app.run();
+```
+
+---
+
+### `antigravity-sidecar-kit/state-sync`
+Global and per-conversation `StateSync` engine (`GET /api/events` SSE, `POST /api/mutate`, `POST /api/notify`, `POST /mcp`) plus `startStdioMcpBridge` for `mcp_config.json` stdio MCP entrypoints. `startStdioMcpBridge` discovers a running sidecar's dynamic loopback port and token from `server_info.json`, forwards JSON-RPC 2.0 requests to `POST /mcp`, and falls back to offline atomic `state.json` reads/mutations when the sidecar HTTP server is not running.
+
+```js
+import { startStdioMcpBridge } from 'antigravity-sidecar-kit/state-sync';
+
+startStdioMcpBridge({
+  sidecarId: 'my-sidecar',
+  initialState: { items: [] },
+  mcpTools: [
+    {
+      name: 'add_item',
+      description: 'Append an item to sidecar state',
+      inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+      handler: async ({ text }, { currentState }) => {
+        const items = [...(currentState.items || []), text];
+        return { patch: { items }, result: { ok: true, count: items.length } };
+      },
+    },
+  ],
+  exitOnClose: true,
+});
 ```
 
 ---

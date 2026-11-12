@@ -47,6 +47,11 @@ try {
     run(`node --input-type=module -e "await import('${specifier}')"`, app);
   }
 
+  run(
+    `node --input-type=module -e "import assert from 'node:assert/strict'; import { StandaloneSidecarApp, createSidecarApp } from '${pkg.name}/server'; import { startStdioMcpBridge } from '${pkg.name}/state-sync'; assert.equal(typeof StandaloneSidecarApp, 'function'); assert.equal(typeof createSidecarApp, 'function'); assert.equal(typeof startStdioMcpBridge, 'function');"`,
+    app
+  );
+
   console.log(`[pack-smoke] ${filename}: bins, scaffold, and ${importable.length} exports OK`);
 } finally {
   rmSync(work, { recursive: true, force: true });
