@@ -38,6 +38,12 @@
   --agy-warn-soft: rgba(223, 142, 29, 0.16);
   --agy-warn-ink: #5c3c00;
   --agy-info: var(--link, var(--color-blue-500, #4380b4));
+  --chart-1: #2563eb;
+  --chart-2: #d97706;
+  --chart-3: #059669;
+  --chart-4: #9333ea;
+  --chart-5: #e11d48;
+  --chart-6: #0284c7;
   --agy-rule: var(--border, rgba(128, 128, 128, 0.12));
   --agy-radius-sm: var(--radius-sm, 0.25rem);
   --agy-radius-md: var(--radius-md, 0.375rem);
@@ -78,6 +84,12 @@
   --agy-warn-soft: rgba(253, 214, 99, 0.16);
   --agy-warn-ink: #fff4d1;
   --agy-info: var(--link, var(--color-blue-400, #6a9fcb));
+  --chart-1: #60a5fa;
+  --chart-2: #fbbf24;
+  --chart-3: #34d399;
+  --chart-4: #c084fc;
+  --chart-5: #fb7185;
+  --chart-6: #38bdf8;
   --agy-rule: var(--border, rgba(128, 128, 128, 0.12));
 }
 

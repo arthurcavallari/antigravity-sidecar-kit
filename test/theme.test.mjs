@@ -492,5 +492,12 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+
+    const darkCharts = resolveHostTheme({ themeMode: 2 });
+    assert.equal(darkCharts.cssVariables['--chart-1'], '#60a5fa');
+    assert.equal(darkCharts.cssVariables['--chart-6'], '#38bdf8');
+    const lightCharts = resolveHostTheme({ themeMode: 1 });
+    assert.equal(lightCharts.cssVariables['--chart-1'], '#2563eb');
+    assert.equal(lightCharts.cssVariables['--chart-6'], '#0284c7');
   });
 });

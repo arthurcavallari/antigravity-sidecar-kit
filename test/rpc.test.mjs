@@ -515,4 +515,24 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
     assert.equal(maxInFlight, 1);
     assert.equal(errors, 1);
   });
+
+  it('resolves browser DevTools WebSocket URL from AGY_BROWSER_WS_URL or AGY_BROWSER_ACTIVE_PORT_FILE [KIT-17]', async () => {
+    const rpcMod = await import('../lib/rpc.mjs');
+    assert.equal(
+      rpcMod.resolveBrowserWsUrl({ env: { AGY_BROWSER_WS_URL: 'ws://127.0.0.1:9333/devtools/browser/abc' } }),
+      'ws://127.0.0.1:9333/devtools/browser/abc'
+    );
+    const dir = mkdtempSync(join(tmpdir(), 'kit-browser-port-'));
+    try {
+      const portFile = join(dir, 'DevToolsActivePort');
+      writeFileSync(portFile, '9222\n/devtools/browser/uuid-2312\n', 'utf8');
+      assert.equal(
+        rpcMod.resolveBrowserWsUrl({ env: { AGY_BROWSER_ACTIVE_PORT_FILE: portFile } }),
+        'ws://127.0.0.1:9222/devtools/browser/uuid-2312'
+      );
+      assert.equal(rpcMod.resolveBrowserWsUrl({ env: {} }), '');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
