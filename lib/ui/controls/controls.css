@@ -54,7 +54,7 @@
   gap: 6px;
   border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
   font-family: inherit;
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--text-base, 0.875rem);
   line-height: 1.25rem;
   font-weight: var(--font-weight-medium, 500);
   border: none;
@@ -78,7 +78,7 @@
 .agy-btn.agy-btn-xs {
   height: 24px;
   gap: 4px;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-sm, 0.75rem);
   line-height: 1rem;
 }
 
@@ -277,7 +277,7 @@ agy-switch {
   background: var(--agy-sunken);
   color: var(--agy-ink);
   font-family: inherit;
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--text-base, 0.875rem);
   outline: none;
   transition: border-color var(--agy-dur) var(--agy-ease);
 }
@@ -300,7 +300,7 @@ agy-switch {
   background: var(--agy-sunken);
   color: var(--agy-ink);
   font-family: inherit;
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--text-compact, 0.8125rem);
   outline: none;
   cursor: pointer;
   transition: border-color var(--agy-dur) var(--agy-ease);
@@ -333,7 +333,7 @@ agy-switch {
   background: var(--agy-sunken);
   color: var(--agy-ink);
   font-family: inherit;
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--text-base, 0.875rem);
   line-height: 1.25rem;
   outline: none;
   transition: border-color var(--agy-dur) var(--agy-ease), background-color var(--agy-dur) var(--agy-ease);
@@ -376,14 +376,14 @@ textarea.agy-input {
 }
 
 .agy-field-label {
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--text-compact, 0.8125rem);
   font-weight: var(--font-weight-medium, 500);
   color: var(--agy-ink);
 }
 
 .agy-field-help {
   margin: 0;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-sm, 0.75rem);
   line-height: 1rem;
   color: var(--agy-ink-faint);
 }

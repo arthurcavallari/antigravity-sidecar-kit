@@ -116,8 +116,8 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.match(controlsRouteCss, /\.agy-search-box\s*>\s*svg,\s*\.agy-search-icon\s*\{[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);/s);
     assert.equal(controlsRouteCss.includes('.agy-search-box svg'), false);
 
-    // Components match Antigravity 2.29's own: buttons default to its "sm" size, with its xs/md/lg sizes
-    assert.match(controlsRouteCss, /\.agy-btn\s*\{[^}]*height:\s*28px;[^}]*padding:\s*0 10px;[^}]*font-size:\s*var\(--text-sm/s);
+    // Components match Antigravity 2.31's own: buttons default to its "sm" size (14px --text-base), with xs/md/lg sizes
+    assert.match(controlsRouteCss, /\.agy-btn\s*\{[^}]*height:\s*28px;[^}]*padding:\s*0 10px;[^}]*font-size:\s*var\(--text-base/s);
     assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-xs\s*\{[^}]*height:\s*24px;/s);
     assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-md\s*\{[^}]*height:\s*32px;/s);
     assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-lg\s*\{[^}]*height:\s*36px;/s);
@@ -126,12 +126,16 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     const surfacesCss = readModuleCss('surfaces');
     assert.match(surfacesCss, /\.agy-card\s*\{[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--agy-card\);/s, 'cards: the 16px radius and the card fill');
     assert.match(surfacesCss, /\.agy-badge\s*\{[^}]*font-weight:\s*var\(--font-weight-normal, 400\);[^}]*background:\s*var\(--agy-sunken\);/s);
-    assert.match(readModuleCss('overlays'), /\.agy-banner\s*\{[^}]*padding:\s*10px 12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*font-size:\s*var\(--text-sm[^}]*background:\s*var\(--agy-card\);/s, 'banners match the callout');
+    assert.match(readModuleCss('overlays'), /\.agy-banner\s*\{[^}]*padding:\s*10px 12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*font-size:\s*var\(--text-base[^}]*background:\s*var\(--agy-card\);/s, 'banners match the callout');
     assert.match(
       readModuleCss('overlays'),
-      /\.agy-toast\s*\{[^}]*max-width:\s*24rem;[^}]*padding:\s*12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--glass, var\(--agy-card\)\);[^}]*font-size:\s*var\(--text-sm/s,
+      /\.agy-toast\s*\{[^}]*max-width:\s*24rem;[^}]*padding:\s*12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--glass, var\(--agy-card\)\);[^}]*font-size:\s*var\(--text-base/s,
       'toasts match the native toast',
     );
+    assert.match(readModuleCss('tabs'), /\.agy-tab\s*\{[^}]*font-size:\s*var\(--text-compact,\s*0\.8125rem\)/s);
+    assert.match(readModuleCss('overlays'), /\.agy-context-menu-item\s*\{[^}]*font-size:\s*var\(--text-compact,\s*0\.8125rem\)/s);
+    assert.equal(AGY_UI_CSS.includes('var(--text-sm, 0.875rem)'), false);
+    assert.equal(AGY_UI_CSS.includes('var(--text-xs, 0.75rem)'), false);
     assert.ok(readModuleCss('overlays').includes('.agy-context-menu-item:focus-visible:not(:disabled)'));
     assert.ok(readModuleCss('layout').includes(':is(agy-split-sash, .agy-split-sash):focus-visible .sash-line'));
   });

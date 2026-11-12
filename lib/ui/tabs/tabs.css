@@ -63,7 +63,7 @@ agy-tab,
   background: transparent;
   color: var(--secondary-foreground, var(--agy-ink-soft));
   font-family: inherit;
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--text-compact, 0.8125rem);
   line-height: 1.25rem;
   font-weight: var(--font-weight-normal, 400);
   cursor: pointer;
@@ -116,8 +116,8 @@ agy-tab,
 
 .agy-tab-badge {
   opacity: 0.78;
-  font-size: var(--text-sm, 0.875rem);
-  line-height: 1.25rem;
+  font-size: var(--text-sm, 0.75rem);
+  line-height: 1rem;
   flex-shrink: 0;
   transition: opacity var(--agy-dur) var(--agy-ease);
 }
@@ -253,7 +253,7 @@ agy-tab,
 }
 
 .agy-tab-drop-hint {
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-sm, 0.75rem);
   color: var(--agy-ink-soft);
   padding: 0 8px;
   user-select: none;
@@ -269,7 +269,7 @@ agy-tab,
   background: var(--agy-canvas);
   color: var(--agy-ink);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm, 0.75rem);
   outline: none;
 }
 
@@ -299,7 +299,7 @@ agy-tab,
 }
 
 .agy-tab-overflow-badge {
-  font-size: 11px;
+  font-size: var(--text-xs, 0.6875rem);
   line-height: 1;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -334,8 +334,8 @@ agy-tab,
   background: transparent;
   color: var(--agy-ink-soft);
   font-family: inherit;
-  font-size: var(--text-xs, 0.75rem);
-  line-height: 1rem;
+  font-size: var(--text-compact, 0.8125rem);
+  line-height: 1.125rem;
   cursor: pointer;
   text-align: left;
   transition:
@@ -446,7 +446,7 @@ agy-toggle-group,
   background: transparent;
   color: var(--secondary-foreground, var(--agy-ink-soft));
   font-family: inherit;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-sm, 0.75rem);
   line-height: 1rem;
   font-weight: var(--font-weight-medium, 500);
   cursor: pointer;
@@ -477,6 +477,6 @@ agy-toggle-group,
 }
 
 .agy-toggle-count {
-  font-size: 11px;
+  font-size: var(--text-xs, 0.6875rem);
   opacity: 0.75;
 }
