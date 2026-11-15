@@ -106,6 +106,18 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.ok(tabsCss.includes('.agy-tab-close:focus-visible'));
     assert.ok(tabsCss.includes('.agy-tab-overflow-item:focus-visible'));
     assert.ok(tabsCss.includes('.agy-toggle-item:focus-visible:not(:disabled)'));
+    assert.match(tabsCss, /\.agy-tab-strip-sub\s*\{[^}]*height:\s*30px;[^}]*min-height:\s*30px;/s);
+    assert.match(tabsCss, /\.agy-tab-strip-sub \.agy-tab\.active::after\s*\{[^}]*height:\s*1\.5px;/s);
+    assert.match(
+      tabsCss,
+      /\.agy-tab-strip-sub :is\(\.agy-tab-add, \.agy-tab-add-btn, \.agy-icon-btn\.agy-tab-add, \.agy-icon-btn\.agy-tab-add-btn\)\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/s
+    );
+    const layoutCss = readModuleCss('layout');
+    assert.match(
+      layoutCss,
+      /\.agy-chrome-bar\s*\{[^}]*height:\s*36px;[^}]*min-height:\s*36px;[^}]*box-shadow:\s*inset 0 -0\.5px 0 0 var\(--agy-card-edge, var\(--agy-rule\)\);/s
+    );
+    assert.match(layoutCss, /\.agy-chrome-bar \.agy-tab\.active\s*\{[^}]*box-shadow:\s*inset 0 1px 0/s);
     assert.ok(controlsRouteCss.includes('.agy-icon-btn:focus-visible:not(:disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-btn:focus-visible:not(:disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-switch:focus-visible:not(:disabled):not(.disabled)'));
