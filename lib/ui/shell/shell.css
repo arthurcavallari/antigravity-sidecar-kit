@@ -93,6 +93,14 @@
   --agy-rule: var(--border, rgba(128, 128, 128, 0.12));
 }
 
+body[data-newux-theme='onyx'] {
+  --nux-radius-md: 12px;
+  --nux-radius-lg: 16px;
+  --nux-radius-xl: 20px;
+  --nux-radius-2xl: 24px;
+  --nux-radius-pill: 9999px;
+}
+
 /* Host-adaptive AGY tokens: 88% ink-soft guarantees >= 4.6:1 contrast across all 14 IDE themes */
 [data-follow-host][data-theme='light'] {
   --agy-ink: var(--foreground, #1f2124);

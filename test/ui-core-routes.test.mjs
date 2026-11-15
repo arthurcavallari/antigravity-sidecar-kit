@@ -84,17 +84,22 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.ok(createUiJsHandler()().body.includes('reconcileTabStrip'));
 
     const tabsCss = readModuleCss('tabs');
-    assert.ok(tabsCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));'));
+    assert.ok(tabsCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-lg, 0.5rem));'));
     assert.ok(tabsCss.includes('background: none;'));
-    assert.ok(tabsCss.includes('mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent calc(100% - 18px));'));
+    assert.ok(tabsCss.includes('mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent calc(100% - 16px));'));
+    assert.ok(tabsCss.includes('mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent calc(100% - 6px));'));
     assert.ok(tabsCss.includes(':has(> :is(.agy-tab-badge, .agy-tab-ext-badge):not(.hidden))'));
-    assert.match(tabsCss, /\.agy-tab-close\s*\{[^}]*min-width:\s*22px;[^}]*min-height:\s*22px;/s);
+    assert.match(
+      tabsCss,
+      /\.agy-tab-close\s*\{[^}]*width:\s*19px;[^}]*height:\s*19px;[^}]*min-width:\s*19px;[^}]*min-height:\s*19px;[^}]*padding:\s*0;[^}]*border-radius:\s*9999px;/s
+    );
+    assert.match(tabsCss, /\.agy-tab-close-wrap\s*\{[^}]*padding-left:\s*12px;[^}]*padding-right:\s*4\.5px;/s);
     assert.ok(tabsCss.includes('mask-image: none;'));
     assert.equal(tabsCss.includes('calc(100% - 14px)'), false);
     assert.equal(tabsCss.includes('linear-gradient(to right, transparent 0%, var(--agy-hover) 25%)'), false);
     assert.equal(tabsCss.includes('linear-gradient(to right, transparent 0%, var(--agy-control) 25%)'), false);
     const tabDragCss = readModuleCss('tab-drag');
-    assert.ok(tabDragCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));'));
+    assert.ok(tabDragCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-lg, 0.5rem));'));
     assert.equal(tabDragCss.includes('border-radius: var(--radius-lg, 0.5rem);'), false);
     assert.ok(tabsCss.includes('.agy-tab:focus-visible'));
     assert.ok(tabsCss.includes('.agy-tab-pin:focus-visible'));

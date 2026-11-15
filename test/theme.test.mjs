@@ -154,6 +154,8 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
     assert.equal(onyxDark.cssVariables['--placeholder'], '#888990');
     assert.equal(onyxDark.cssVariables['--border'], ONYX_THEME_TOKENS.dark.high['--border']);
     assert.equal(onyxDark.cssVariables['--onyx-frame'], '#0D0D11');
+    assert.equal(onyxDark.cssVariables['--nux-radius-pill'], '9999px');
+    assert.equal(vesper.cssVariables['--nux-radius-pill'], undefined, 'Non-Onyx presets must omit --nux-radius-pill');
 
     const onyxLightNormal = resolveHostTheme({ themeMode: 1, preset: 'Onyx Light', contrast: 1 });
     assert.equal(onyxLightNormal.cssVariables['--card'], '#FFFFFF');
@@ -315,6 +317,17 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
       classList: { contains: (cls) => cls === 'theme-light' && attrs.get('class') === 'theme-light' },
     };
 
+    const bodyAttrs = new Map();
+    const bodyEl = {
+      hasAttribute: (k) => bodyAttrs.has(k),
+      getAttribute: (k) => (bodyAttrs.has(k) ? bodyAttrs.get(k) : null),
+      setAttribute: (k, v) => bodyAttrs.set(k, String(v)),
+      removeAttribute: (k) => bodyAttrs.delete(k),
+      classList: {
+        toggle: () => {},
+      },
+    };
+
     const sandbox = {
       URLSearchParams,
       sessionStorage: {
@@ -331,6 +344,7 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
       document: {
         readyState: 'loading',
         documentElement: rootEl,
+        body: bodyEl,
       },
       MutationObserver: class {
         constructor(cb) {
@@ -443,6 +457,8 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
     assert.equal(attrs.get('data-theme'), 'dark');
     assert.equal(styleProps.has('--onyx-well'), false);
     assert.equal(styleProps.has('--onyx-key'), false);
+    assert.equal(styleProps.has('--nux-radius-pill'), false);
+    assert.equal(bodyAttrs.has('data-newux-theme'), false, 'Non-Onyx theme must remove data-newux-theme attribute');
 
     // Font scale from resolveHostTheme persists when subsequent host theme-change omits --app-font-scale
     observerDeliveries = 0;
