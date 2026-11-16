@@ -120,7 +120,7 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
       layoutCss,
       /\.agy-chrome-bar\s*\{[^}]*height:\s*36px;[^}]*min-height:\s*36px;[^}]*background:\s*var\(--agy-canvas\);[^}]*box-shadow:\s*inset 0 -0\.5px 0 0 var\(--agy-card-edge, var\(--agy-rule\)\);/s
     );
-    assert.match(layoutCss, /\.agy-chrome-bar \.agy-tab\.active\s*\{[^}]*box-shadow:\s*inset 0 1px 0/s);
+    assert.equal(layoutCss.includes('.agy-chrome-bar .agy-tab.active'), false);
     assert.ok(controlsRouteCss.includes('.agy-icon-btn:focus-visible:not(:disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-btn:focus-visible:not(:disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-switch:focus-visible:not(:disabled):not(.disabled)'));
