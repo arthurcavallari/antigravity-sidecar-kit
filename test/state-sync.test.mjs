@@ -415,6 +415,256 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
     sub.close();
   });
 
+  it('subscribeStateSyncEvents closes EventSource while hidden and reconnects when visible again', () => {
+    const instances = [];
+    const winListeners = new Map();
+    const docListeners = new Map();
+    const timers = new Map();
+    let nextTimerId = 1;
+    let ioCallback = null;
+    let ioDisconnected = false;
+
+    class FakeEventSource {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        this.listeners = new Map();
+        instances.push(this);
+      }
+      addEventListener(type, fn) {
+        this.listeners.set(type, fn);
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+
+    class MockIntersectionObserver {
+      constructor(cb) {
+        ioCallback = cb;
+      }
+      observe() {}
+      disconnect() {
+        ioDisconnected = true;
+      }
+    }
+
+    const addListener = (map, type, fn) => {
+      const set = map.get(type) || new Set();
+      set.add(fn);
+      map.set(type, set);
+    };
+    const removeListener = (map, type, fn) => {
+      map.get(type)?.delete(fn);
+    };
+    const emit = (map, type, ev) => {
+      for (const fn of [...(map.get(type) || [])]) fn(ev);
+    };
+
+    const parentWin = {};
+    const closeFetches = [];
+    const doc = {
+      readyState: 'complete',
+      hidden: true,
+      documentElement: { dataset: {}, style: {} },
+      addEventListener: (t, fn) => addListener(docListeners, t, fn),
+      removeEventListener: (t, fn) => removeListener(docListeners, t, fn),
+    };
+    const win = {
+      parent: parentWin,
+      document: doc,
+      EventSource: FakeEventSource,
+      location: { href: 'http://127.0.0.1:5000/?token=t1', search: '?token=t1' },
+      matchMedia: () => ({ matches: true }),
+      addEventListener: (t, fn) => addListener(winListeners, t, fn),
+      removeEventListener: (t, fn) => removeListener(winListeners, t, fn),
+      fetch: async (url, init) => {
+        closeFetches.push({ url, init });
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      },
+    };
+
+    vm.runInNewContext(AGY_CLIENT_JS, {
+      window: win,
+      document: doc,
+      EventSource: FakeEventSource,
+      IntersectionObserver: MockIntersectionObserver,
+      URL,
+      URLSearchParams,
+      setTimeout(fn, ms) {
+        const id = nextTimerId++;
+        timers.set(id, { fn, ms });
+        return id;
+      },
+      clearTimeout(id) {
+        timers.delete(id);
+      },
+    });
+
+    const baselineMsgListeners = winListeners.get('message')?.size || 0;
+    const sub = win.AgyShell.subscribeStateSyncEvents({
+      immediate: true,
+      conversationId: 'conv-vis',
+    });
+    assert.equal(winListeners.get('message')?.size, baselineMsgListeners + 1);
+
+    // 1. Starts hidden: zero EventSource connections opened
+    assert.equal(instances.length, 0, 'hidden frame must not open EventSource');
+    assert.equal(sub.isVisible(), false);
+
+    // 2. Document becomes visible -> opens first EventSource
+    doc.hidden = false;
+    emit(docListeners, 'visibilitychange');
+    assert.equal(sub.isVisible(), true);
+    assert.equal(instances.length, 1);
+    assert.equal(instances[0].closed, false);
+
+    // Redundant visibility events while already connected do not churn the socket
+    emit(docListeners, 'visibilitychange');
+    assert.equal(instances.length, 1);
+
+    // 3. CSS hide via IntersectionObserver closes the open EventSource AND posts /api/events/close for plugin:// proxy sockets
+    const firstCid = new URL(instances[0].url).searchParams.get('clientId');
+    assert.ok(firstCid, 'EventSource URL must include a unique clientId');
+    ioCallback([{ isIntersecting: false }]);
+    assert.equal(sub.isVisible(), false);
+    assert.equal(instances[0].closed, true);
+    assert.equal(closeFetches.length, 1);
+    assert.match(String(closeFetches[0].url), /\/api\/events\/close/);
+    assert.equal(closeFetches[0].init.keepalive, true);
+    assert.equal(closeFetches[0].init.headers['X-Sidecar-Token'], 't1');
+    assert.deepEqual(JSON.parse(closeFetches[0].init.body), { clientId: firstCid });
+
+    // Re-entering viewport opens a fresh EventSource with a new clientId
+    ioCallback([{ isIntersecting: true }]);
+    assert.equal(sub.isVisible(), true);
+    assert.equal(instances.length, 2);
+    assert.equal(instances[1].closed, false);
+    assert.notEqual(new URL(instances[1].url).searchParams.get('clientId'), firstCid);
+
+    // 4. Error schedules backoff timer (honoring sse_lease_expired retryMs); hiding via sidecar-visibility cancels pending reconnect
+    instances[1].listeners.get('sse_lease_expired')?.({ data: JSON.stringify({ retryMs: 15000 }) });
+    instances[1].onerror();
+    assert.equal(instances[1].closed, true);
+    assert.equal(timers.size, 1, 'reconnect timer scheduled while visible');
+    assert.equal([...timers.values()][0].ms, 15000, 'sse_lease_expired must set backoff delay');
+
+    emit(winListeners, 'message', {
+      source: parentWin,
+      data: { type: 'sidecar-visibility', payload: { visible: false } },
+    });
+    assert.equal(sub.isVisible(), false);
+    assert.equal(timers.size, 0, 'hiding frame must cancel pending reconnect timer');
+
+    // Untrusted message source is ignored
+    emit(winListeners, 'message', {
+      source: {},
+      data: { type: 'sidecar-visibility', payload: { visible: true } },
+    });
+    assert.equal(instances.length, 2);
+
+    // Trusted parent sidecar-visibility: true reconnects immediately
+    emit(winListeners, 'message', {
+      source: parentWin,
+      data: { type: 'sidecar-visibility', payload: { visible: true } },
+    });
+    assert.equal(sub.isVisible(), true);
+    assert.equal(instances.length, 3);
+    assert.equal(instances[2].closed, false);
+
+    // 5. Explicit close() tears down EventSource and detaches all visibility observers
+    sub.close();
+    assert.equal(instances[2].closed, true);
+    assert.equal(ioDisconnected, true);
+    assert.equal(winListeners.get('message')?.size || 0, baselineMsgListeners);
+    assert.equal(docListeners.get('visibilitychange')?.size || 0, 0);
+
+    emit(winListeners, 'message', {
+      source: parentWin,
+      data: { type: 'sidecar-visibility', payload: { visible: false } },
+    });
+    emit(winListeners, 'message', {
+      source: parentWin,
+      data: { type: 'sidecar-visibility', payload: { visible: true } },
+    });
+    assert.equal(instances.length, 3, 'closed subscription must never reconnect');
+  });
+
+  it('POST /api/events/close ends zombie plugin:// SSE streams on the server and maxSseClients caps concurrent open SSE sockets at <= 4', async () => {
+    const { StandaloneSidecarApp } = await import('../lib/server.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'kit-sse-close-'));
+    const app = new StandaloneSidecarApp({ port: 0, uiToken: 'close-tok-99' });
+    const sync = registerStateSyncRoutes(app, {
+      sidecarId: 'sse-close-test',
+      dataRoot: dir,
+      initialState: () => ({ ok: true }),
+    });
+    const server = await app.run();
+    const acList = [];
+    try {
+      const { port } = server.address();
+      const openStream = async (cid) => {
+        const ac = new AbortController();
+        acList.push(ac);
+        const res = await fetch(`http://127.0.0.1:${port}/api/events?token=close-tok-99&clientId=${cid}`, {
+          signal: ac.signal,
+        });
+        assert.equal(res.status, 200);
+        const reader = res.body.getReader();
+        const first = await reader.read();
+        assert.equal(first.done, false);
+        return reader;
+      };
+
+      const r1 = await openStream('cid-1');
+      assert.equal(sync.globalState.sseClients.size, 1);
+
+      // Unauthenticated close is rejected with 401 and leaves stream open
+      const unauthClose = await fetch(`http://127.0.0.1:${port}/api/events/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: 'cid-1' }),
+      });
+      assert.equal(unauthClose.status, 401);
+      assert.equal(sync.globalState.sseClients.size, 1);
+
+      // Authenticated close ends the server response stream immediately (EOF) even when client socket wasn't aborted
+      const okClose = await fetch(`http://127.0.0.1:${port}/api/events/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Sidecar-Token': 'close-tok-99' },
+        body: JSON.stringify({ clientId: 'cid-1' }),
+      });
+      assert.equal(okClose.status, 200);
+      assert.deepEqual(await okClose.json(), { ok: true, closed: true });
+      const eof = await r1.read();
+      assert.equal(eof.done, true, 'server must call res.end() so Electron plugin:// upstream socket closes');
+      assert.equal(sync.globalState.sseClients.size, 0);
+
+      // Opening 5 concurrent streams evicts the oldest so open SSE streams never exceed 4 (leaving >=2 of 6 HTTP/1.1 sockets free)
+      const rA = await openStream('cid-a');
+      await openStream('cid-b');
+      await openStream('cid-c');
+      await openStream('cid-d');
+      assert.equal(sync.globalState.sseClients.size, 4);
+
+      await openStream('cid-e');
+      assert.equal(sync.globalState.sseClients.size, 4, 'must cap open SSE streams at 4');
+      const dec = new TextDecoder();
+      let evictedText = '';
+      while (true) {
+        const chunk = await rA.read();
+        if (chunk.done) break;
+        evictedText += dec.decode(chunk.value, { stream: true });
+      }
+      assert.match(evictedText, /event: sse_lease_expired/);
+    } finally {
+      for (const ac of acList) ac.abort();
+      sync.dispose();
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('isolates handleNotify deduplication per conversation, honors explicit _new, and enforces auth on mutate/notify/mcp (F-02, F-09)', async () => {
     const sent = [];
     const sync = new StateSync({
