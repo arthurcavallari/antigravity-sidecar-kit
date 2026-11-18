@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -531,6 +531,241 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
         'ws://127.0.0.1:9222/devtools/browser/uuid-2312'
       );
       assert.equal(rpcMod.resolveBrowserWsUrl({ env: {} }), '');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers live-PID and newest-mtime runtime.json over stale alphabetical entries', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-rpc-liveness-'));
+    try {
+      const writeRuntime = (name, payload, mtimeSec) => {
+        const dataDir = join(dir, name, 'data');
+        mkdirSync(dataDir, { recursive: true });
+        const p = join(dataDir, 'runtime.json');
+        writeFileSync(p, JSON.stringify(payload) + '\n', 'utf8');
+        // Set deterministic mtime via fs.utimesSync imported dynamically or at top
+        return p;
+      };
+      const pAlpha = writeRuntime('alpha-dead', {
+        pid: 999999,
+        launcherPid: 999998,
+        webPort: 49001,
+        lsAddress: '127.0.0.1:49279',
+        csrfToken: 'dead-token-alpha',
+      });
+      const pBeta = writeRuntime('beta-old-live', {
+        pid: process.pid,
+        webPort: 50001,
+        lsAddress: '127.0.0.1:50001',
+        csrfToken: 'old-live-token',
+      });
+      const pZeta = writeRuntime('zeta-new-live', {
+        pid: process.pid,
+        webPort: 53336,
+        lsAddress: '127.0.0.1:53336',
+        csrfToken: 'new-live-token',
+      });
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      // Even give dead alpha the NEWEST mtime to prove live PID beats dead PID,
+      // and zeta newer mtime than beta to prove mtime breaks ties among live PIDs!
+      utimesSync(pAlpha, nowSec + 100, nowSec + 100);
+      utimesSync(pBeta, nowSec - 60, nowSec - 60);
+      utimesSync(pZeta, nowSec, nowSec);
+
+      const killProbe = (pid) => {
+        if (pid === process.pid) return true;
+        const err = new Error('ESRCH');
+        err.code = 'ESRCH';
+        throw err;
+      };
+
+      const cfg = getLsConfig({
+        sidecarDataRoot: dir,
+        killFn: killProbe,
+        env: {
+          ANTIGRAVITY_AGENT: '1',
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:59000',
+          ANTIGRAVITY_CSRF_TOKEN: 'restricted-agent-token',
+        },
+      });
+      assert.deepEqual(cfg, { lsAddress: '127.0.0.1:53336', csrfToken: 'new-live-token' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('advances past recycled-PID dead ports in both callLsRpc and callLsStreamRpc before agent gateway fallback', async () => {
+    const rpcMod = await import('../lib/rpc.mjs');
+    assert.equal(typeof rpcMod.isPidAlive, 'function');
+    assert.equal(typeof rpcMod.listCachedLsCredentials, 'function');
+
+    // EPERM counts as alive; ESRCH counts as dead
+    assert.equal(
+      rpcMod.isPidAlive(1234, {
+        killFn: () => {
+          const e = new Error('EPERM');
+          e.code = 'EPERM';
+          throw e;
+        },
+      }),
+      true
+    );
+    assert.equal(
+      rpcMod.isPidAlive(1234, {
+        killFn: () => {
+          const e = new Error('ESRCH');
+          e.code = 'ESRCH';
+          throw e;
+        },
+      }),
+      false
+    );
+
+    const dir = mkdtempSync(join(tmpdir(), 'kit-rpc-fallback-'));
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      for (const [name, port, tok, offset] of [
+        ['alpha-recycled', 49279, 'stale-tok', 20],
+        ['hangar', 53336, 'live-sidecar-tok', 10],
+      ]) {
+        const d = join(dir, name, 'data');
+        mkdirSync(d, { recursive: true });
+        const p = join(d, 'runtime.json');
+        writeFileSync(p, JSON.stringify({ pid: process.pid, lsAddress: `127.0.0.1:${port}`, csrfToken: tok }), 'utf8');
+        utimesSync(p, nowSec + offset, nowSec + offset);
+      }
+
+      const agentEnv = {
+        ANTIGRAVITY_AGENT: '1',
+        ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:59999',
+        ANTIGRAVITY_CSRF_TOKEN: 'agent-gw-tok',
+      };
+
+      // 1. Unary + Stream advance from dead 49279 -> live 53336 without falling back to restricted 59999
+      const seenUnary = [];
+      const unaryRes = await getSidecars({
+        sidecarDataRoot: dir,
+        env: agentEnv,
+        fetchFn: async (url, init) => {
+          seenUnary.push({ url, tok: init.headers['x-codeium-csrf-token'] });
+          if (url.includes(':49279/')) throw new TypeError('fetch failed');
+          return { ok: true, status: 200, text: async () => JSON.stringify({ sidecars: ['ok'] }) };
+        },
+      });
+      assert.deepEqual(unaryRes, { sidecars: ['ok'] });
+      assert.deepEqual(
+        seenUnary.map((x) => x.tok),
+        ['stale-tok', 'live-sidecar-tok']
+      );
+
+      const seenStream = [];
+      const logsRes = await rpcMod.getSidecarLogs('context-monitor', {
+        sidecarDataRoot: dir,
+        env: agentEnv,
+        tailLines: 5,
+        fetchFn: async (url, init) => {
+          seenStream.push({ url, tok: init.headers['x-codeium-csrf-token'] });
+          if (url.includes(':49279/')) throw new TypeError('fetch failed');
+          const frame = rpcMod.encodeConnectFrame({ logs: 'ok-line\n' }, 0);
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength),
+          };
+        },
+      });
+      assert.equal(logsRes.logs, 'ok-line\n');
+      assert.deepEqual(
+        seenStream.map((x) => x.tok),
+        ['stale-tok', 'live-sidecar-tok']
+      );
+
+      // 2. If all cached sidecars fail connection, both fall back to allowAgentGateway (59999)
+      const seenAllDead = [];
+      const gwLogs = await rpcMod.getSidecarLogs('context-monitor', {
+        sidecarDataRoot: dir,
+        env: agentEnv,
+        fetchFn: async (url, init) => {
+          seenAllDead.push(init.headers['x-codeium-csrf-token']);
+          if (!url.includes(':59999/')) throw new TypeError('fetch failed');
+          const frame = rpcMod.encodeConnectFrame({ logs: 'from-gw\n' }, 0);
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength),
+          };
+        },
+      });
+      assert.equal(gwLogs.logs, 'from-gw\n');
+      assert.deepEqual(seenAllDead, ['stale-tok', 'live-sidecar-tok', 'agent-gw-tok']);
+
+      // 3. Mid-stream error after >=1 frame must NOT replay the stream on another credential
+      let midStreamCalls = 0;
+      await assert.rejects(
+        () =>
+          rpcMod.callLsStreamRpc(
+            'GetSidecarLogs',
+            { sidecarId: 'context-monitor' },
+            {
+              sidecarDataRoot: dir,
+              env: agentEnv,
+              maxFrames: 5,
+              fetchFn: async () => {
+                midStreamCalls++;
+                let step = 0;
+                return {
+                  ok: true,
+                  status: 200,
+                  body: {
+                    getReader: () => ({
+                      read: async () => {
+                        step++;
+                        if (step === 1) return { done: false, value: rpcMod.encodeConnectFrame({ logs: 'part1\n' }, 0) };
+                        throw new Error('socket reset mid-stream');
+                      },
+                      cancel: async () => {},
+                    }),
+                  },
+                };
+              },
+            }
+          ),
+        /socket reset mid-stream/
+      );
+      assert.equal(midStreamCalls, 1, 'must not replay stream once frames were already emitted');
+
+      // 4. allowAgentGateway permission_denied before frames upgrades stream to cached sidecar credentials
+      const seenPermUpgrade = [];
+      const permLogs = await rpcMod.getSidecarLogs('hangar', {
+        sidecarDataRoot: dir,
+        sidecarId: 'hangar',
+        allowAgentGateway: true,
+        env: agentEnv,
+        fetchFn: async (url, init) => {
+          seenPermUpgrade.push(init.headers['x-codeium-csrf-token']);
+          if (url.includes(':59999/')) {
+            const errFrame = rpcMod.encodeConnectFrame(
+              { error: { code: 'permission_denied', message: 'not allowed for principal run_command' } },
+              0x02
+            );
+            return {
+              ok: true,
+              status: 200,
+              arrayBuffer: async () => errFrame.buffer.slice(errFrame.byteOffset, errFrame.byteOffset + errFrame.byteLength),
+            };
+          }
+          const okFrame = rpcMod.encodeConnectFrame({ logs: 'upgraded\n' }, 0);
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => okFrame.buffer.slice(okFrame.byteOffset, okFrame.byteOffset + okFrame.byteLength),
+          };
+        },
+      });
+      assert.equal(permLogs.logs, 'upgraded\n');
+      assert.deepEqual(seenPermUpgrade, ['agent-gw-tok', 'live-sidecar-tok']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
