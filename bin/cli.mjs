@@ -82,8 +82,8 @@ for (let i = 0; i < rawArgs.length; i++) {
     entrypoint = arg.slice('--entrypoint='.length);
     continue;
   }
-  if (arg === '--entrypoint' && rawArgs[i + 1]) {
-    entrypoint = rawArgs[++i];
+  if (arg === '--entrypoint') {
+    entrypoint = rawArgs[++i] ?? '';
     continue;
   }
   if (arg.startsWith('--dir=')) {

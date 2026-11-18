@@ -78,6 +78,13 @@ describe('antigravity-sidecar-kit CLI', () => {
         { encoding: 'utf8' }
       );
       assert.equal(badEp.status, 1);
+
+      const emptyEp = spawnSync(
+        process.execPath,
+        [CLI, 'init', 'empty-ep', '--dir', join(dir, 'empty-ep'), '--entrypoint'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(emptyEp.status, 1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

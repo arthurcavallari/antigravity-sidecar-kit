@@ -144,6 +144,13 @@ describe('manifest-validator', () => {
       assert.equal(badTitleBar.valid, false);
       assert.ok(badTitleBar.errors.length >= 5);
       assert.ok(badTitleBar.errors.every((e) => e.ruleId === 'SIDECAR-DRIFT-04'));
+
+      const badCamelUiConfig = validateSidecarJson({
+        command: 'node',
+        uiConfig: { views: [{ entrypoint: 'invalid' }] },
+      });
+      assert.equal(badCamelUiConfig.valid, false);
+      assert.equal(badCamelUiConfig.errors[0].ruleId, 'SIDECAR-DRIFT-04');
     });
   });
 
