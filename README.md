@@ -27,7 +27,7 @@ npm install
 npm run setup
 ```
 
-Options: `--dir <target-dir>` to choose the output folder, `--force` to overwrite an existing scaffold.
+Options: `--dir <target-dir>` to choose the output folder, `--entrypoint <aux_pane|sidebar|full_pane>` to mount in the Auxiliary Pane (default) or left-sidebar Extensions section (`SIDECAR_UI_ENTRYPOINT_SIDEBAR`), `--hide-title-bar` to set `title_bar_style: "SIDECAR_UI_TITLE_BAR_STYLE_HIDDEN"` on standalone views, and `--force` to overwrite an existing scaffold.
 
 `npm create antigravity-sidecar` runs the [`create-antigravity-sidecar`](https://www.npmjs.com/package/create-antigravity-sidecar) launcher. `npx antigravity-sidecar-kit init my-sidecar` does the same thing.
 

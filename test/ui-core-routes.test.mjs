@@ -425,9 +425,10 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     await domWin.AgyShell.notifyAgent('hello from direct iframe');
     assert.equal(captured[0].init.headers['X-Sidecar-Token'], 'direct-tok-777');
 
-    // KIT-04: notifyAgent awaits window.sidecar.getWorkspaceUris() when on a _new pane
+    // KIT-04: notifyAgent awaits window.sidecar.getWorkspaceUris() and prefers it over stale window.sidecar.workspace
     domWin.sidecar = {
       conversationId: '_new',
+      workspace: 'file:///stale-legacy-prop',
       getWorkspaceUris: async () => ['file:///workspace/from-bridge'],
     };
     await domWin.AgyShell.notifyAgent('hello from _new pane', '_new', 'Alert');

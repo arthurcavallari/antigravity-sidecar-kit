@@ -94,6 +94,57 @@ describe('manifest-validator', () => {
       assert.equal(badScheduleArgs.valid, false);
       assert.equal(badScheduleArgs.errors.length, 1);
     });
+
+    it('validates SidecarUIView title_bar_style / titleBarStyle, path, title, file_extensions, and url_schemes', () => {
+      const okSidebar = validateSidecarJson({
+        command: 'node',
+        args: ['launch.mjs'],
+        has_web_ui: true,
+        ui_config: {
+          display_name: 'Sidebar App',
+          views: [
+            {
+              entrypoint: 'SIDECAR_UI_ENTRYPOINT_SIDEBAR',
+              path: '/app',
+              title: 'Sidebar App',
+              title_bar_style: 'SIDECAR_UI_TITLE_BAR_STYLE_HIDDEN',
+              file_extensions: ['.pdb', '.cif'],
+              url_schemes: ['https'],
+            },
+            {
+              entrypoint: 'SIDECAR_UI_ENTRYPOINT_AUX_PANE',
+              path: '/',
+              title: 'Aux App',
+              titleBarStyle: 'SIDECAR_UI_TITLE_BAR_STYLE_UNSPECIFIED',
+              fileExtensions: ['.json'],
+              urlSchemes: ['https'],
+            },
+          ],
+        },
+      });
+      assert.equal(okSidebar.valid, true);
+      assert.equal(okSidebar.errors.length, 0);
+
+      const badTitleBar = validateSidecarJson({
+        command: 'node',
+        args: ['launch.mjs'],
+        ui_config: {
+          views: [
+            {
+              entrypoint: 'SIDECAR_UI_ENTRYPOINT_SIDEBAR',
+              path: 'relative-without-slash',
+              title: 123,
+              title_bar_style: 'hidden',
+              file_extensions: [42],
+              url_schemes: [null],
+            },
+          ],
+        },
+      });
+      assert.equal(badTitleBar.valid, false);
+      assert.ok(badTitleBar.errors.length >= 5);
+      assert.ok(badTitleBar.errors.every((e) => e.ruleId === 'SIDECAR-DRIFT-04'));
+    });
   });
 
   describe('validateHubManifest', () => {
