@@ -770,4 +770,64 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('resolves sidecar_data root without double-nesting ANTIGRAVITY_EXECUTABLE_DATA_DIR and recovers legacy 1.8.0 double-nested runtime.json', async () => {
+    const { resolveSidecarDataRoot } = await import('../lib/config.mjs');
+    const rpcMod = await import('../lib/rpc.mjs');
+    const home = mkdtempSync(join(tmpdir(), 'kit-exec-data-'));
+    try {
+      const appDir = join(home, '.gemini', 'antigravity');
+      const sidecarRoot = join(appDir, 'sidecar_data');
+      // Real Antigravity 2.32.x sidecar env: ANTIGRAVITY_EXECUTABLE_DATA_DIR is <app_data_dir>/sidecar_data/<id>/data
+      const hangarExecData = join(sidecarRoot, 'hangar', 'data');
+      const cockpitExecData = join(sidecarRoot, 'agy-plugin-porter', 'cockpit', 'data');
+
+      assert.equal(
+        resolveSidecarDataRoot({
+          ANTIGRAVITY_APP_DATA_DIR: appDir,
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: hangarExecData,
+        }),
+        sidecarRoot
+      );
+      assert.equal(
+        resolveSidecarDataRoot({
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: cockpitExecData,
+        }),
+        sidecarRoot
+      );
+
+      // Persist inside Hangar sidecar process, then read from external agent shell without ANTIGRAVITY_EXECUTABLE_DATA_DIR
+      persistSidecarRuntime('hangar', {
+        env: {
+          ANTIGRAVITY_APP_DATA_DIR: appDir,
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: hangarExecData,
+          ANTIGRAVITY_SIDECAR_WEB_PORT: '60548',
+          ANTIGRAVITY_LS_ADDRESS: 'localhost:53336',
+          ANTIGRAVITY_CSRF_TOKEN: 'live-hangar-tok',
+        },
+      });
+      const fromAgentShell = getLsConfig({
+        env: {
+          USERPROFILE: home,
+          HOME: home,
+          ANTIGRAVITY_AGENT: '1',
+          ANTIGRAVITY_LS_ADDRESS: 'localhost:53336',
+          ANTIGRAVITY_CSRF_TOKEN: 'run-cmd-tok',
+        },
+      });
+      assert.deepEqual(fromAgentShell, { lsAddress: 'localhost:53336', csrfToken: 'live-hangar-tok' });
+
+      // Legacy 1.8.0 double-nested runtime.json (<sidecar_data>/context-monitor/data/sidecar_data/context-monitor/data/runtime.json)
+      const legacyNested = join(sidecarRoot, 'context-monitor', 'data', 'sidecar_data', 'context-monitor', 'data');
+      mkdirSync(legacyNested, { recursive: true });
+      writeFileSync(
+        join(legacyNested, 'runtime.json'),
+        JSON.stringify({ pid: process.pid, webPort: 60545, lsAddress: 'localhost:53337', csrfToken: 'legacy-nested-tok' })
+      );
+      const list = rpcMod.listCachedLsCredentials(sidecarRoot, 'context-monitor');
+      assert.equal(list[0].csrfToken, 'legacy-nested-tok');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
