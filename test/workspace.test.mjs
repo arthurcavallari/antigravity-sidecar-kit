@@ -137,5 +137,25 @@ describe('antigravity-sidecar-kit/workspace normalization and glob matching', ()
     ]);
     // Without an id it can only guess, and the guess is the newest view time
     assert.equal(ask(''), 'conv-prev');
+
+    // KIT-10: Side-question trajectories must not hijack un-scoped workspace resolution
+    const withSideQuestion = resolveActiveWorkspace({
+      summariesResponse: {
+        trajectorySummaries: {
+          'cold-main': {
+            conversationKind: 'CONVERSATION_KIND_MAIN',
+            annotations: { lastUserViewTime: '2026-10-25T01:00:00Z' },
+            workspaces: [{ workspaceFolderAbsoluteUri: 'file:///c:/Projects/MainCold' }],
+          },
+          'side-q': {
+            conversationKind: 'CONVERSATION_KIND_SIDE_QUESTION',
+            annotations: { lastUserViewTime: '2026-10-25T02:00:00Z' },
+            workspaces: [{ workspaceFolderAbsoluteUri: 'file:///c:/Projects/SideThread' }],
+          },
+        },
+      },
+    });
+    assert.equal(withSideQuestion.conversationId, 'cold-main');
+    assert.equal(withSideQuestion.workspacePath, 'c:/Projects/MainCold');
   });
 });

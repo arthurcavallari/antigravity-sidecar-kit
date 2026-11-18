@@ -3,12 +3,21 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  height: 40px;
-  min-height: 40px;
+  height: 36px;
+  min-height: 36px;
   padding: 0 8px 0 6px;
   background: var(--agy-canvas);
-  border-bottom: 1px solid var(--agy-rule);
+  border-bottom: none;
+  box-shadow: inset 0 -0.5px 0 0 var(--agy-card-edge, var(--agy-rule));
   user-select: none;
+}
+
+@media (forced-colors: active) {
+  .agy-chrome-bar {
+    background: Canvas;
+    border-bottom: 1px solid ButtonBorder;
+    box-shadow: none;
+  }
 }
 
 .agy-chrome-actions {

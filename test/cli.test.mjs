@@ -14,6 +14,11 @@ describe('antigravity-sidecar-kit CLI', () => {
   it('exposes a bin named after the package so `npx antigravity-sidecar-kit` resolves', () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
     assert.equal(pkg.bin[pkg.name], 'bin/cli.mjs');
+    const wrapperPkg = JSON.parse(
+      readFileSync(join(ROOT, 'packages', 'create-antigravity-sidecar', 'package.json'), 'utf8')
+    );
+    assert.equal(wrapperPkg.dependencies['antigravity-sidecar-kit'], `^${pkg.version}`);
+    assert.equal(existsSync(join(ROOT, 'package-lock.json')), true);
   });
 
   it('prints usage and exits 0 for --help, exits 1 without a name', () => {
@@ -47,6 +52,39 @@ describe('antigravity-sidecar-kit CLI', () => {
 
       const again = spawnSync(process.execPath, [CLI, 'init', 'demo', '--dir', outDir], { encoding: 'utf8' });
       assert.equal(again.status, 1, 'refuses to overwrite without --force');
+
+      const sidebarDir = join(dir, 'sidebar-demo');
+      execFileSync(
+        process.execPath,
+        [CLI, 'init', 'sidebar-demo', '--dir', sidebarDir, '--entrypoint', 'sidebar', '--hide-title-bar'],
+        { encoding: 'utf8' }
+      );
+      const sidebarManifest = JSON.parse(readFileSync(join(sidebarDir, 'sidecar.json'), 'utf8'));
+      assert.deepEqual(sidebarManifest.ui_config.views, [
+        {
+          entrypoint: 'SIDECAR_UI_ENTRYPOINT_SIDEBAR',
+          path: '/',
+          title: 'Sidebar Demo',
+          title_bar_style: 'SIDECAR_UI_TITLE_BAR_STYLE_HIDDEN',
+        },
+      ]);
+      const lintSidebar = spawnSync(process.execPath, [CLI, 'lint', '--json', sidebarDir], { encoding: 'utf8' });
+      assert.equal(lintSidebar.status, 0);
+      assert.equal(JSON.parse(lintSidebar.stdout).valid, true);
+
+      const badEp = spawnSync(
+        process.execPath,
+        [CLI, 'init', 'bad-ep', '--dir', join(dir, 'bad-ep'), '--entrypoint=bogus'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(badEp.status, 1);
+
+      const emptyEp = spawnSync(
+        process.execPath,
+        [CLI, 'init', 'empty-ep', '--dir', join(dir, 'empty-ep'), '--entrypoint'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(emptyEp.status, 1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -57,13 +57,13 @@ agy-tab,
   height: 28px;
   overflow: hidden;
   padding: 4px 8px 4px 6px;
-  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
+  border-radius: var(--nux-radius-pill, var(--agy-radius-lg, 0.5rem));
   border: none;
   outline: none;
   background: transparent;
   color: var(--secondary-foreground, var(--agy-ink-soft));
   font-family: inherit;
-  font-size: var(--text-sm, 0.875rem);
+  font-size: var(--text-compact, 0.8125rem);
   line-height: 1.25rem;
   font-weight: var(--font-weight-normal, 400);
   cursor: pointer;
@@ -116,8 +116,8 @@ agy-tab,
 
 .agy-tab-badge {
   opacity: 0.78;
-  font-size: var(--text-sm, 0.875rem);
-  line-height: 1.25rem;
+  font-size: var(--text-sm, 0.75rem);
+  line-height: 1rem;
   flex-shrink: 0;
   transition: opacity var(--agy-dur) var(--agy-ease);
 }
@@ -172,10 +172,10 @@ agy-tab,
   z-index: 10;
   display: flex;
   align-items: center;
-  padding-left: 16px;
-  padding-right: 4px;
-  border-top-right-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
-  border-bottom-right-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
+  padding-left: 12px;
+  padding-right: 4.5px;
+  border-top-right-radius: var(--nux-radius-pill, var(--agy-radius-lg, 0.5rem));
+  border-bottom-right-radius: var(--nux-radius-pill, var(--agy-radius-lg, 0.5rem));
   background: none;
   opacity: 0;
   pointer-events: none;
@@ -188,13 +188,13 @@ agy-tab,
 }
 
 .agy-tab:has(> .agy-tab-close-wrap:not(.hidden)):not([data-pinned="true"], .is-renaming, .agy-tab-drag-ghost, :has(.agy-rename-input, .agy-tab-rename-input)):is(:hover, :focus-visible, :has(:focus-visible)) .agy-tab-label {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent calc(100% - 18px));
-  mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent calc(100% - 18px));
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent calc(100% - 16px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent calc(100% - 16px));
 }
 
 .agy-tab:has(> .agy-tab-close-wrap:not(.hidden)):has(> .agy-status-dot:not(.hidden)):not([data-pinned="true"], .is-renaming, .agy-tab-drag-ghost, :has(.agy-rename-input, .agy-tab-rename-input)):is(:hover, :focus-visible, :has(:focus-visible)) .agy-tab-label {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent calc(100% - 8px));
-  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent calc(100% - 8px));
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent calc(100% - 6px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent calc(100% - 6px));
 }
 
 .agy-tab:has(> .agy-tab-close-wrap:not(.hidden)):has(> :is(.agy-tab-badge, .agy-tab-ext-badge):not(.hidden)):not([data-pinned="true"], .is-renaming, .agy-tab-drag-ghost, :has(.agy-rename-input, .agy-tab-rename-input)):is(:hover, :focus-visible, :has(:focus-visible)) .agy-tab-label {
@@ -216,10 +216,12 @@ agy-tab,
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  min-height: 22px;
-  padding: 2px;
-  border-radius: 4px;
+  width: 19px;
+  height: 19px;
+  min-width: 19px;
+  min-height: 19px;
+  padding: 0;
+  border-radius: 9999px;
   color: var(--muted-foreground, var(--agy-ink-faint));
   background: transparent;
   border: none;
@@ -247,13 +249,13 @@ agy-tab,
   width: 28px;
   height: 28px;
   margin-left: 0;
-  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
+  border-radius: var(--nux-radius-pill, var(--agy-radius-md, 0.375rem));
   color: var(--secondary-foreground, var(--agy-ink-soft));
   flex-shrink: 0;
 }
 
 .agy-tab-drop-hint {
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-sm, 0.75rem);
   color: var(--agy-ink-soft);
   padding: 0 8px;
   user-select: none;
@@ -269,7 +271,7 @@ agy-tab,
   background: var(--agy-canvas);
   color: var(--agy-ink);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm, 0.75rem);
   outline: none;
 }
 
@@ -299,7 +301,7 @@ agy-tab,
 }
 
 .agy-tab-overflow-badge {
-  font-size: 11px;
+  font-size: var(--text-xs, 0.6875rem);
   line-height: 1;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -334,8 +336,8 @@ agy-tab,
   background: transparent;
   color: var(--agy-ink-soft);
   font-family: inherit;
-  font-size: var(--text-xs, 0.75rem);
-  line-height: 1rem;
+  font-size: var(--text-compact, 0.8125rem);
+  line-height: 1.125rem;
   cursor: pointer;
   text-align: left;
   transition:
@@ -415,11 +417,89 @@ agy-tab,
   padding-top: 4px;
 }
 
+.agy-tab-strip-sub {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 2px;
+  gap: 2px;
+}
+
+.agy-tab-strip-sub .agy-tab {
+  height: 30px;
+  padding: 0 8px;
+  gap: 5px;
+  border-radius: 0;
+  font-size: var(--text-sm, 0.75rem);
+  line-height: 1rem;
+  color: var(--agy-ink-faint);
+  background: transparent;
+  box-shadow: none;
+}
+
+.agy-tab-strip-sub .agy-tab.active {
+  color: var(--agy-ink);
+  background: transparent;
+  font-weight: var(--font-weight-medium, 500);
+  box-shadow: none;
+}
+
+.agy-tab-strip-sub .agy-tab:hover {
+  color: var(--agy-ink);
+  background: color-mix(in srgb, var(--agy-ink) 3.5%, transparent);
+}
+
+.agy-tab-strip-sub .agy-tab:focus-visible {
+  outline-offset: -2px;
+}
+
+.agy-tab-strip-sub .agy-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 0;
+  background: var(--agy-ink);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.agy-tab-strip-sub .agy-tab-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.agy-tab-strip-sub .agy-tab-close-wrap {
+  padding-left: 10px;
+  padding-right: 4px;
+  border-radius: 0;
+}
+
+.agy-tab-strip-sub .agy-tab-close {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+}
+
+.agy-tab-strip-sub :is(.agy-tab-add, .agy-tab-add-btn, .agy-icon-btn.agy-tab-add, .agy-icon-btn.agy-tab-add-btn) {
+  width: 24px;
+  height: 24px;
+}
+
+@media (forced-colors: active) {
+  .agy-tab-strip-sub .agy-tab.active::after {
+    background: Highlight;
+    opacity: 1;
+  }
+}
+
 agy-toggle-group,
 .agy-toggle-group {
   display: inline-flex;
   align-items: center;
-  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
+  border-radius: var(--nux-radius-pill, var(--agy-radius-lg, 0.5rem));
   border: 1px solid var(--agy-rule);
   background: var(--onyx-well, color-mix(in srgb, var(--agy-control) 20%, transparent));
   padding: 2px;
@@ -440,13 +520,13 @@ agy-toggle-group,
   height: 22px;
   padding: 0 8px;
   gap: 4px;
-  border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));
+  border-radius: var(--nux-radius-pill, var(--agy-radius-md, 0.375rem));
   border: none;
   outline: none;
   background: transparent;
   color: var(--secondary-foreground, var(--agy-ink-soft));
   font-family: inherit;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-sm, 0.75rem);
   line-height: 1rem;
   font-weight: var(--font-weight-medium, 500);
   cursor: pointer;
@@ -477,6 +557,6 @@ agy-toggle-group,
 }
 
 .agy-toggle-count {
-  font-size: 11px;
+  font-size: var(--text-xs, 0.6875rem);
   opacity: 0.75;
 }

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -184,6 +184,46 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
       const unknown = getLsConfig({ sidecarDataRoot: dir, env: { ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:3333' } });
       assert.equal(unknown.csrfToken, '');
 
+      // KIT-03: In ANTIGRAVITY_AGENT=1 run_command shells, prefer sidecar runtime.json credentials
+      const agentCfg = getLsConfig({
+        sidecarDataRoot: dir,
+        sidecarId: 'b',
+        env: {
+          ANTIGRAVITY_AGENT: '1',
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:9999',
+          ANTIGRAVITY_CSRF_TOKEN: 'run-command-restricted-token',
+        },
+      });
+      assert.deepEqual(agentCfg, { lsAddress: '127.0.0.1:2222', csrfToken: 'token-for-2222' });
+
+      // Sidecar processes themselves (with ANTIGRAVITY_SIDECAR_WEB_PORT set) still honor their own env
+      const sidecarOwnCfg = getLsConfig({
+        sidecarDataRoot: dir,
+        env: {
+          ANTIGRAVITY_AGENT: '1',
+          ANTIGRAVITY_SIDECAR_WEB_PORT: '55000',
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:4444',
+          ANTIGRAVITY_CSRF_TOKEN: 'own-sidecar-token',
+        },
+      });
+      assert.deepEqual(sidecarOwnCfg, { lsAddress: '127.0.0.1:4444', csrfToken: 'own-sidecar-token' });
+
+      // KIT-09: 2-level <plugin>/<sidecar>/data/runtime.json and ANTIGRAVITY_EXECUTABLE_DATA_DIR
+      const execDir = join(dir, 'custom-exec-data');
+      persistSidecarRuntime('agy-plugin-porter/cockpit', {
+        env: {
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: execDir,
+          ANTIGRAVITY_SIDECAR_WEB_PORT: '53821',
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:7777',
+          ANTIGRAVITY_CSRF_TOKEN: 'plugin-tok-7777',
+        },
+      });
+      const twoLevelCfg = getLsConfig({
+        sidecarId: 'agy-plugin-porter--cockpit',
+        env: { ANTIGRAVITY_EXECUTABLE_DATA_DIR: execDir },
+      });
+      assert.deepEqual(twoLevelCfg, { lsAddress: '127.0.0.1:7777', csrfToken: 'plugin-tok-7777' });
+
       if (process.platform === 'win32') {
         t.diagnostic('POSIX file modes not applicable on Windows');
         return;
@@ -221,19 +261,87 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
     });
 
     const rpcMod = await import('../lib/rpc.mjs');
-    await rpcMod.getSidecarLogs('hangar', { ...opts, logFileName: 'sidecar.log', maxLines: 50 });
-    await rpcMod.getSidecarEvents('hangar', opts);
-    await rpcMod.listSidecarLogFiles('hangar', opts);
-    await rpcMod.resolveSidecarConfig('C:/sidecar/sidecar.json', opts);
-    assert.ok(calls[4].url.endsWith('/GetSidecarLogs'));
-    assert.deepEqual(JSON.parse(calls[4].init.body), {
-      sidecarId: 'hangar',
+    const streamMockFetch = async (url, init) => {
+      calls.push({ url, init });
+      const bodyFrames = rpcMod.encodeConnectFrame({ logs: 'line 1\nline 2\n' }, 0);
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => bodyFrames.buffer.slice(bodyFrames.byteOffset, bodyFrames.byteOffset + bodyFrames.byteLength),
+      };
+    };
+    const logsRes = await rpcMod.getSidecarLogs('hangar', {
+      ...opts,
+      fetchFn: streamMockFetch,
       logFileName: 'sidecar.log',
       maxLines: 50,
+    });
+    assert.equal(logsRes.logs, 'line 1\nline 2\n');
+    await rpcMod.getSidecarEvents('hangar', opts);
+    await rpcMod.listSidecarLogFiles('hangar', opts);
+    await rpcMod.resolveSidecarConfig('hangar', {
+      ...opts,
+      argumentValues: { LOG_LEVEL: 'debug' },
+    });
+    assert.ok(calls[4].url.endsWith('/GetSidecarLogs'));
+    assert.equal(calls[4].init.headers['Content-Type'], 'application/connect+json');
+    assert.equal(calls[4].init.headers['Connect-Protocol-Version'], '1');
+    const decodedLogReq = rpcMod.parseConnectFrames(calls[4].init.body).frames[0];
+    assert.deepEqual(decodedLogReq.data, {
+      sidecarId: 'hangar',
+      logFilename: 'sidecar.log',
+      tailLines: 50,
     });
     assert.ok(calls[5].url.endsWith('/GetSidecarEvents'));
     assert.ok(calls[6].url.endsWith('/ListSidecarLogFiles'));
     assert.ok(calls[7].url.endsWith('/ResolveSidecarConfig'));
+    assert.deepEqual(JSON.parse(calls[7].init.body), {
+      sidecarId: 'hangar',
+      argumentValues: { LOG_LEVEL: 'debug' },
+    });
+
+    // KIT-10: getTrajectorySummaries merges multi-frame JetboxSubscribeToSummaries updates
+    const batchA = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`c-${i}`, { summary: `S${i}` }]));
+    const batchB = { 'c-100': { summary: 'S100' } };
+    const sumOut = await rpcMod.getTrajectorySummaries({
+      ...opts,
+      fetchFn: async (url, init) => {
+        calls.push({ url, init });
+        const joined = Buffer.concat([
+          rpcMod.encodeConnectFrame({ updates: batchA, deletes: [] }, 0),
+          rpcMod.encodeConnectFrame({ updates: batchB, deletes: ['c-0'] }, 0),
+        ]);
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => joined.buffer.slice(joined.byteOffset, joined.byteOffset + joined.byteLength),
+        };
+      },
+    });
+    assert.ok(calls[8].url.endsWith('/JetboxSubscribeToSummaries'));
+    assert.equal(Object.keys(sumOut.trajectorySummaries).length, 100);
+    assert.equal(sumOut.trajectorySummaries['c-0'], undefined);
+    assert.equal(sumOut.trajectorySummaries['c-100'].summary, 'S100');
+
+    await assert.rejects(
+      () =>
+        rpcMod.getSidecarLogs('hangar', {
+          lsAddress: '127.0.0.1:50000',
+          csrfToken: 'tok-1',
+          fetchFn: async () => {
+            const errFrame = rpcMod.encodeConnectFrame(
+              { error: { code: 'invalid_argument', message: 'unknown sidecar' } },
+              0x02
+            );
+            return {
+              ok: true,
+              status: 200,
+              arrayBuffer: async () => errFrame.buffer.slice(errFrame.byteOffset, errFrame.byteOffset + errFrame.byteLength),
+            };
+          },
+        }),
+      /LanguageServerService\/GetSidecarLogs failed: unknown sidecar/
+    );
 
     await assert.rejects(
       () =>
@@ -406,5 +514,320 @@ describe('antigravity-sidecar-kit/rpc client, credential cache, and process rest
     poller.stop();
     assert.equal(maxInFlight, 1);
     assert.equal(errors, 1);
+  });
+
+  it('resolves browser DevTools WebSocket URL from AGY_BROWSER_WS_URL or AGY_BROWSER_ACTIVE_PORT_FILE [KIT-17]', async () => {
+    const rpcMod = await import('../lib/rpc.mjs');
+    assert.equal(
+      rpcMod.resolveBrowserWsUrl({ env: { AGY_BROWSER_WS_URL: 'ws://127.0.0.1:9333/devtools/browser/abc' } }),
+      'ws://127.0.0.1:9333/devtools/browser/abc'
+    );
+    const dir = mkdtempSync(join(tmpdir(), 'kit-browser-port-'));
+    try {
+      const portFile = join(dir, 'DevToolsActivePort');
+      writeFileSync(portFile, '9222\n/devtools/browser/uuid-2312\n', 'utf8');
+      assert.equal(
+        rpcMod.resolveBrowserWsUrl({ env: { AGY_BROWSER_ACTIVE_PORT_FILE: portFile } }),
+        'ws://127.0.0.1:9222/devtools/browser/uuid-2312'
+      );
+      assert.equal(rpcMod.resolveBrowserWsUrl({ env: {} }), '');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers live-PID and newest-mtime runtime.json over stale alphabetical entries', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-rpc-liveness-'));
+    try {
+      const writeRuntime = (name, payload, mtimeSec) => {
+        const dataDir = join(dir, name, 'data');
+        mkdirSync(dataDir, { recursive: true });
+        const p = join(dataDir, 'runtime.json');
+        writeFileSync(p, JSON.stringify(payload) + '\n', 'utf8');
+        // Set deterministic mtime via fs.utimesSync imported dynamically or at top
+        return p;
+      };
+      const pAlpha = writeRuntime('alpha-dead', {
+        pid: 999999,
+        launcherPid: 999998,
+        webPort: 49001,
+        lsAddress: '127.0.0.1:49279',
+        csrfToken: 'dead-token-alpha',
+      });
+      const pBeta = writeRuntime('beta-old-live', {
+        pid: process.pid,
+        webPort: 50001,
+        lsAddress: '127.0.0.1:50001',
+        csrfToken: 'old-live-token',
+      });
+      const pZeta = writeRuntime('zeta-new-live', {
+        pid: process.pid,
+        webPort: 53336,
+        lsAddress: '127.0.0.1:53336',
+        csrfToken: 'new-live-token',
+      });
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      // Even give dead alpha the NEWEST mtime to prove live PID beats dead PID,
+      // and zeta newer mtime than beta to prove mtime breaks ties among live PIDs!
+      utimesSync(pAlpha, nowSec + 100, nowSec + 100);
+      utimesSync(pBeta, nowSec - 60, nowSec - 60);
+      utimesSync(pZeta, nowSec, nowSec);
+
+      const killProbe = (pid) => {
+        if (pid === process.pid) return true;
+        const err = new Error('ESRCH');
+        err.code = 'ESRCH';
+        throw err;
+      };
+
+      const cfg = getLsConfig({
+        sidecarDataRoot: dir,
+        killFn: killProbe,
+        env: {
+          ANTIGRAVITY_AGENT: '1',
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:59000',
+          ANTIGRAVITY_CSRF_TOKEN: 'restricted-agent-token',
+        },
+      });
+      assert.deepEqual(cfg, { lsAddress: '127.0.0.1:53336', csrfToken: 'new-live-token' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('advances past recycled-PID dead ports in both callLsRpc and callLsStreamRpc before agent gateway fallback', async () => {
+    const rpcMod = await import('../lib/rpc.mjs');
+    assert.equal(typeof rpcMod.isPidAlive, 'function');
+    assert.equal(typeof rpcMod.listCachedLsCredentials, 'function');
+
+    // EPERM counts as alive; ESRCH counts as dead
+    assert.equal(
+      rpcMod.isPidAlive(1234, {
+        killFn: () => {
+          const e = new Error('EPERM');
+          e.code = 'EPERM';
+          throw e;
+        },
+      }),
+      true
+    );
+    assert.equal(
+      rpcMod.isPidAlive(1234, {
+        killFn: () => {
+          const e = new Error('ESRCH');
+          e.code = 'ESRCH';
+          throw e;
+        },
+      }),
+      false
+    );
+
+    const dir = mkdtempSync(join(tmpdir(), 'kit-rpc-fallback-'));
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      for (const [name, port, tok, offset] of [
+        ['alpha-recycled', 49279, 'stale-tok', 20],
+        ['hangar', 53336, 'live-sidecar-tok', 10],
+      ]) {
+        const d = join(dir, name, 'data');
+        mkdirSync(d, { recursive: true });
+        const p = join(d, 'runtime.json');
+        writeFileSync(p, JSON.stringify({ pid: process.pid, lsAddress: `127.0.0.1:${port}`, csrfToken: tok }), 'utf8');
+        utimesSync(p, nowSec + offset, nowSec + offset);
+      }
+
+      const agentEnv = {
+        ANTIGRAVITY_AGENT: '1',
+        ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:59999',
+        ANTIGRAVITY_CSRF_TOKEN: 'agent-gw-tok',
+      };
+
+      // 1. Unary + Stream advance from dead 49279 -> live 53336 without falling back to restricted 59999
+      const seenUnary = [];
+      const unaryRes = await getSidecars({
+        sidecarDataRoot: dir,
+        env: agentEnv,
+        fetchFn: async (url, init) => {
+          seenUnary.push({ url, tok: init.headers['x-codeium-csrf-token'] });
+          if (url.includes(':49279/')) throw new TypeError('fetch failed');
+          return { ok: true, status: 200, text: async () => JSON.stringify({ sidecars: ['ok'] }) };
+        },
+      });
+      assert.deepEqual(unaryRes, { sidecars: ['ok'] });
+      assert.deepEqual(
+        seenUnary.map((x) => x.tok),
+        ['stale-tok', 'live-sidecar-tok']
+      );
+
+      const seenStream = [];
+      const logsRes = await rpcMod.getSidecarLogs('context-monitor', {
+        sidecarDataRoot: dir,
+        env: agentEnv,
+        tailLines: 5,
+        fetchFn: async (url, init) => {
+          seenStream.push({ url, tok: init.headers['x-codeium-csrf-token'] });
+          if (url.includes(':49279/')) throw new TypeError('fetch failed');
+          const frame = rpcMod.encodeConnectFrame({ logs: 'ok-line\n' }, 0);
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength),
+          };
+        },
+      });
+      assert.equal(logsRes.logs, 'ok-line\n');
+      assert.deepEqual(
+        seenStream.map((x) => x.tok),
+        ['stale-tok', 'live-sidecar-tok']
+      );
+
+      // 2. If all cached sidecars fail connection, both fall back to allowAgentGateway (59999)
+      const seenAllDead = [];
+      const gwLogs = await rpcMod.getSidecarLogs('context-monitor', {
+        sidecarDataRoot: dir,
+        env: agentEnv,
+        fetchFn: async (url, init) => {
+          seenAllDead.push(init.headers['x-codeium-csrf-token']);
+          if (!url.includes(':59999/')) throw new TypeError('fetch failed');
+          const frame = rpcMod.encodeConnectFrame({ logs: 'from-gw\n' }, 0);
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength),
+          };
+        },
+      });
+      assert.equal(gwLogs.logs, 'from-gw\n');
+      assert.deepEqual(seenAllDead, ['stale-tok', 'live-sidecar-tok', 'agent-gw-tok']);
+
+      // 3. Mid-stream error after >=1 frame must NOT replay the stream on another credential
+      let midStreamCalls = 0;
+      await assert.rejects(
+        () =>
+          rpcMod.callLsStreamRpc(
+            'GetSidecarLogs',
+            { sidecarId: 'context-monitor' },
+            {
+              sidecarDataRoot: dir,
+              env: agentEnv,
+              maxFrames: 5,
+              fetchFn: async () => {
+                midStreamCalls++;
+                let step = 0;
+                return {
+                  ok: true,
+                  status: 200,
+                  body: {
+                    getReader: () => ({
+                      read: async () => {
+                        step++;
+                        if (step === 1) return { done: false, value: rpcMod.encodeConnectFrame({ logs: 'part1\n' }, 0) };
+                        throw new Error('socket reset mid-stream');
+                      },
+                      cancel: async () => {},
+                    }),
+                  },
+                };
+              },
+            }
+          ),
+        /socket reset mid-stream/
+      );
+      assert.equal(midStreamCalls, 1, 'must not replay stream once frames were already emitted');
+
+      // 4. allowAgentGateway permission_denied before frames upgrades stream to cached sidecar credentials
+      const seenPermUpgrade = [];
+      const permLogs = await rpcMod.getSidecarLogs('hangar', {
+        sidecarDataRoot: dir,
+        sidecarId: 'hangar',
+        allowAgentGateway: true,
+        env: agentEnv,
+        fetchFn: async (url, init) => {
+          seenPermUpgrade.push(init.headers['x-codeium-csrf-token']);
+          if (url.includes(':59999/')) {
+            const errFrame = rpcMod.encodeConnectFrame(
+              { error: { code: 'permission_denied', message: 'not allowed for principal run_command' } },
+              0x02
+            );
+            return {
+              ok: true,
+              status: 200,
+              arrayBuffer: async () => errFrame.buffer.slice(errFrame.byteOffset, errFrame.byteOffset + errFrame.byteLength),
+            };
+          }
+          const okFrame = rpcMod.encodeConnectFrame({ logs: 'upgraded\n' }, 0);
+          return {
+            ok: true,
+            status: 200,
+            arrayBuffer: async () => okFrame.buffer.slice(okFrame.byteOffset, okFrame.byteOffset + okFrame.byteLength),
+          };
+        },
+      });
+      assert.equal(permLogs.logs, 'upgraded\n');
+      assert.deepEqual(seenPermUpgrade, ['agent-gw-tok', 'live-sidecar-tok']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves sidecar_data root without double-nesting ANTIGRAVITY_EXECUTABLE_DATA_DIR and recovers legacy 1.8.0 double-nested runtime.json', async () => {
+    const { resolveSidecarDataRoot } = await import('../lib/config.mjs');
+    const rpcMod = await import('../lib/rpc.mjs');
+    const home = mkdtempSync(join(tmpdir(), 'kit-exec-data-'));
+    try {
+      const appDir = join(home, '.gemini', 'antigravity');
+      const sidecarRoot = join(appDir, 'sidecar_data');
+      // Real Antigravity 2.32.x sidecar env: ANTIGRAVITY_EXECUTABLE_DATA_DIR is <app_data_dir>/sidecar_data/<id>/data
+      const hangarExecData = join(sidecarRoot, 'hangar', 'data');
+      const cockpitExecData = join(sidecarRoot, 'agy-plugin-porter', 'cockpit', 'data');
+
+      assert.equal(
+        resolveSidecarDataRoot({
+          ANTIGRAVITY_APP_DATA_DIR: appDir,
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: hangarExecData,
+        }),
+        sidecarRoot
+      );
+      assert.equal(
+        resolveSidecarDataRoot({
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: cockpitExecData,
+        }),
+        sidecarRoot
+      );
+
+      // Persist inside Hangar sidecar process, then read from external agent shell without ANTIGRAVITY_EXECUTABLE_DATA_DIR
+      persistSidecarRuntime('hangar', {
+        env: {
+          ANTIGRAVITY_APP_DATA_DIR: appDir,
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: hangarExecData,
+          ANTIGRAVITY_SIDECAR_WEB_PORT: '60548',
+          ANTIGRAVITY_LS_ADDRESS: 'localhost:53336',
+          ANTIGRAVITY_CSRF_TOKEN: 'live-hangar-tok',
+        },
+      });
+      const fromAgentShell = getLsConfig({
+        env: {
+          USERPROFILE: home,
+          HOME: home,
+          ANTIGRAVITY_AGENT: '1',
+          ANTIGRAVITY_LS_ADDRESS: 'localhost:53336',
+          ANTIGRAVITY_CSRF_TOKEN: 'run-cmd-tok',
+        },
+      });
+      assert.deepEqual(fromAgentShell, { lsAddress: 'localhost:53336', csrfToken: 'live-hangar-tok' });
+
+      // Legacy 1.8.0 double-nested runtime.json (<sidecar_data>/context-monitor/data/sidecar_data/context-monitor/data/runtime.json)
+      const legacyNested = join(sidecarRoot, 'context-monitor', 'data', 'sidecar_data', 'context-monitor', 'data');
+      mkdirSync(legacyNested, { recursive: true });
+      writeFileSync(
+        join(legacyNested, 'runtime.json'),
+        JSON.stringify({ pid: process.pid, webPort: 60545, lsAddress: 'localhost:53337', csrfToken: 'legacy-nested-tok' })
+      );
+      const list = rpcMod.listCachedLsCredentials(sidecarRoot, 'context-monitor');
+      assert.equal(list[0].csrfToken, 'legacy-nested-tok');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

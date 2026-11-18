@@ -94,6 +94,64 @@ describe('manifest-validator', () => {
       assert.equal(badScheduleArgs.valid, false);
       assert.equal(badScheduleArgs.errors.length, 1);
     });
+
+    it('validates SidecarUIView title_bar_style / titleBarStyle, path, title, file_extensions, and url_schemes', () => {
+      const okSidebar = validateSidecarJson({
+        command: 'node',
+        args: ['launch.mjs'],
+        has_web_ui: true,
+        ui_config: {
+          display_name: 'Sidebar App',
+          views: [
+            {
+              entrypoint: 'SIDECAR_UI_ENTRYPOINT_SIDEBAR',
+              path: '/app',
+              title: 'Sidebar App',
+              title_bar_style: 'SIDECAR_UI_TITLE_BAR_STYLE_HIDDEN',
+              file_extensions: ['.pdb', '.cif'],
+              url_schemes: ['https'],
+            },
+            {
+              entrypoint: 'SIDECAR_UI_ENTRYPOINT_AUX_PANE',
+              path: '/',
+              title: 'Aux App',
+              titleBarStyle: 'SIDECAR_UI_TITLE_BAR_STYLE_UNSPECIFIED',
+              fileExtensions: ['.json'],
+              urlSchemes: ['https'],
+            },
+          ],
+        },
+      });
+      assert.equal(okSidebar.valid, true);
+      assert.equal(okSidebar.errors.length, 0);
+
+      const badTitleBar = validateSidecarJson({
+        command: 'node',
+        args: ['launch.mjs'],
+        ui_config: {
+          views: [
+            {
+              entrypoint: 'SIDECAR_UI_ENTRYPOINT_SIDEBAR',
+              path: 'relative-without-slash',
+              title: 123,
+              title_bar_style: 'hidden',
+              file_extensions: [42],
+              url_schemes: [null],
+            },
+          ],
+        },
+      });
+      assert.equal(badTitleBar.valid, false);
+      assert.ok(badTitleBar.errors.length >= 5);
+      assert.ok(badTitleBar.errors.every((e) => e.ruleId === 'SIDECAR-DRIFT-04'));
+
+      const badCamelUiConfig = validateSidecarJson({
+        command: 'node',
+        uiConfig: { views: [{ entrypoint: 'invalid' }] },
+      });
+      assert.equal(badCamelUiConfig.valid, false);
+      assert.equal(badCamelUiConfig.errors[0].ruleId, 'SIDECAR-DRIFT-04');
+    });
   });
 
   describe('validateHubManifest', () => {
@@ -378,6 +436,40 @@ describe('manifest-validator', () => {
         }
       } finally {
         rmSync(rulesDir, { recursive: true, force: true });
+      }
+
+      // KIT-11: VAR-HOOK-01 (${PLUGIN_ROOT} in hooks.json command) and MCP-NAME-01 (64-char MCP tool budget)
+      const kit11Dir = mkdtempSync(join(tmpdir(), 'kit-lint-kit11-'));
+      try {
+        writeFileSync(join(kit11Dir, 'plugin.json'), JSON.stringify({ name: 'acme-long-plugin-suite', version: '1.0.0' }));
+        mkdirSync(join(kit11Dir, 'scripts'), { recursive: true });
+        writeFileSync(join(kit11Dir, 'scripts', 'hook.mjs'), 'export {};\n');
+        writeFileSync(
+          join(kit11Dir, 'hooks.json'),
+          JSON.stringify({
+            hooks: {
+              PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'node ${PLUGIN_ROOT}/scripts/hook.mjs' }] }],
+            },
+          })
+        );
+        writeFileSync(
+          join(kit11Dir, 'mcp_config.json'),
+          JSON.stringify({
+            mcpServers: {
+              'acme-long-plugin-suite_audit-engine': { command: 'node', args: ['${PLUGIN_ROOT}/scripts/hook.mjs'] },
+            },
+          })
+        );
+        const check11 = lintPluginOrSidecar(kit11Dir, { fix: false });
+        const warn11 = check11.warnings.map((w) => w.ruleId);
+        assert.ok(warn11.includes('VAR-HOOK-01'));
+        assert.ok(warn11.includes('MCP-NAME-01'));
+
+        lintPluginOrSidecar(kit11Dir, { fix: true });
+        const fixedHookCmd = JSON.parse(readFileSync(join(kit11Dir, 'hooks.json'), 'utf8')).hooks.PreToolUse[0].hooks[0].command;
+        assert.equal(fixedHookCmd, 'node ./scripts/hook.mjs');
+      } finally {
+        rmSync(kit11Dir, { recursive: true, force: true });
       }
     });
   });

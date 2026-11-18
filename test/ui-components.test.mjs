@@ -47,6 +47,7 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     const [pill1, pill2] = stripEl.querySelectorAll('.agy-tab');
     assert.equal(pill1.dataset.tabId, 't1');
     assert.equal(pill1.querySelector('.agy-tab-close')?.getAttribute('tabindex'), '0');
+    assert.equal(pill1.querySelector('.agy-tab-close svg')?.getAttribute('width'), '13');
     assert.equal(pill1.querySelector('.agy-tab-pin')?.getAttribute('tabindex'), '-1');
     assert.equal(pill2.querySelector('.agy-tab-ext-badge')?.title, 'Opened externally');
 

@@ -133,9 +133,40 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
         opts: { projectId: 'proj-99' },
       });
 
-      // /mcp JSON-RPC 2.0 protocol
-      const initRes = await sync.handleMcp({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+      // KIT-04: _new + workspace invokes agentapi new-conversation (no --workspace flag)
+      const newRes = await syncAgentApi.handleNotify({
+        conversationId: '_new',
+        workspace: 'file:///workspace/demo',
+        title: 'Fresh Thread',
+        message: 'Start fresh diagnostics',
+      });
+      assert.equal(newRes.ok, true);
+      assert.deepEqual(apiCalls.at(-1), {
+        args: ['new-conversation', '--title', 'Fresh Thread', 'Start fresh diagnostics'],
+        opts: { projectId: '', workspace: 'file:///workspace/demo' },
+      });
+
+      // /mcp JSON-RPC 2.0 protocol (2024-11-05 + 2026-07-28 server/discover & stateless lists)
+      const discoverRes = await sync.handleMcp({
+        jsonrpc: '2.0',
+        id: 100,
+        method: 'server/discover',
+        params: { supportedVersions: ['2026-07-28', '2024-11-05'] },
+      });
+      assert.equal(discoverRes.result.protocolVersion, '2026-07-28');
+      assert.equal(discoverRes.result.resultType, 'complete');
+      assert.equal(discoverRes.result._meta['io.modelcontextprotocol/serverInfo'].name, 'test-sync');
+
+      const initRes = await sync.handleMcp({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2026-07-28' } });
       assert.equal(initRes.result.serverInfo.name, 'test-sync');
+      assert.equal(initRes.result.protocolVersion, '2026-07-28');
+
+      const promptsRes = await sync.handleMcp({ jsonrpc: '2.0', id: 101, method: 'prompts/list' });
+      assert.deepEqual(promptsRes.result, { prompts: [] });
+      const resourcesRes = await sync.handleMcp({ jsonrpc: '2.0', id: 102, method: 'resources/list' });
+      assert.deepEqual(resourcesRes.result, { resources: [] });
+      const subRes = await sync.handleMcp({ jsonrpc: '2.0', id: 103, method: 'subscriptions/listen' });
+      assert.deepEqual(subRes.result, {});
 
       const listRes = await sync.handleMcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
       assert.equal(listRes.result.tools.length, 2);
@@ -259,6 +290,15 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
       assert.equal(resValid.status, 200);
       ac.abort();
 
+      // KIT-07: plugin:// custom Electron scheme origin is permitted when token is valid
+      const acPlugin = new AbortController();
+      const resPluginOrigin = await fetch(`http://127.0.0.1:${port}/api/events?token=secret-token-123`, {
+        headers: { Origin: 'plugin://agy-plugin-porter--porter-cockpit-53821' },
+        signal: acPlugin.signal,
+      });
+      assert.equal(resPluginOrigin.status, 200);
+      acPlugin.abort();
+
       assert.equal(verifySidecarToken('secret-token-123', 'secret-token-123'), true);
       assert.equal(verifySidecarToken('short', 'secret-token-123'), false);
     } finally {
@@ -283,7 +323,7 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
     );
   });
 
-  it('isStandaloneAgentApiBinary distinguishes agentapi(.exe) from agy/antigravity wrapper and handleNotify falls back to start-conversation', async () => {
+  it('isStandaloneAgentApiBinary distinguishes agentapi(.exe) from agy/antigravity wrapper and handleNotify falls back to new-conversation', async () => {
     assert.equal(isStandaloneAgentApiBinary('C:\\Users\\arthu\\bin\\agentapi.exe'), true);
     assert.equal(isStandaloneAgentApiBinary('/usr/local/bin/agentapi'), true);
     assert.equal(isStandaloneAgentApiBinary('C:\\Program Files\\Antigravity\\agy.exe'), false);
@@ -317,7 +357,7 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
         message: 'Start fresh',
       });
       assert.equal(resNew.ok, true);
-      assert.deepEqual(fallbackCalls[0], ['start-conversation', '--workspace', '/tmp/ws', 'Start fresh']);
+      assert.deepEqual(fallbackCalls[0], ['new-conversation', '--title', 'Sidecar State', 'Start fresh']);
 
       const resExpired = await sync.handleNotify({
         conversationId: 'conv-expired',
@@ -325,7 +365,7 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
         message: 'Recover expired',
       });
       assert.equal(resExpired.ok, true);
-      assert.deepEqual(fallbackCalls.at(-1), ['start-conversation', '--workspace', '/tmp/ws', 'Recover expired']);
+      assert.deepEqual(fallbackCalls.at(-1), ['new-conversation', '--title', 'Sidecar State', 'Recover expired']);
     } finally {
       sync.dispose();
     }
@@ -373,6 +413,256 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
     listeners.get('state')({ data: JSON.stringify({ state: { ready: true }, version: 3 }) });
     assert.deepEqual(JSON.parse(JSON.stringify(received)), [{ state: { ready: true }, version: 3 }]);
     sub.close();
+  });
+
+  it('subscribeStateSyncEvents closes EventSource while hidden and reconnects when visible again', () => {
+    const instances = [];
+    const winListeners = new Map();
+    const docListeners = new Map();
+    const timers = new Map();
+    let nextTimerId = 1;
+    let ioCallback = null;
+    let ioDisconnected = false;
+
+    class FakeEventSource {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        this.listeners = new Map();
+        instances.push(this);
+      }
+      addEventListener(type, fn) {
+        this.listeners.set(type, fn);
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+
+    class MockIntersectionObserver {
+      constructor(cb) {
+        ioCallback = cb;
+      }
+      observe() {}
+      disconnect() {
+        ioDisconnected = true;
+      }
+    }
+
+    const addListener = (map, type, fn) => {
+      const set = map.get(type) || new Set();
+      set.add(fn);
+      map.set(type, set);
+    };
+    const removeListener = (map, type, fn) => {
+      map.get(type)?.delete(fn);
+    };
+    const emit = (map, type, ev) => {
+      for (const fn of [...(map.get(type) || [])]) fn(ev);
+    };
+
+    const parentWin = {};
+    const closeFetches = [];
+    const doc = {
+      readyState: 'complete',
+      hidden: true,
+      documentElement: { dataset: {}, style: {} },
+      addEventListener: (t, fn) => addListener(docListeners, t, fn),
+      removeEventListener: (t, fn) => removeListener(docListeners, t, fn),
+    };
+    const win = {
+      parent: parentWin,
+      document: doc,
+      EventSource: FakeEventSource,
+      location: { href: 'http://127.0.0.1:5000/?token=t1', search: '?token=t1' },
+      matchMedia: () => ({ matches: true }),
+      addEventListener: (t, fn) => addListener(winListeners, t, fn),
+      removeEventListener: (t, fn) => removeListener(winListeners, t, fn),
+      fetch: async (url, init) => {
+        closeFetches.push({ url, init });
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      },
+    };
+
+    vm.runInNewContext(AGY_CLIENT_JS, {
+      window: win,
+      document: doc,
+      EventSource: FakeEventSource,
+      IntersectionObserver: MockIntersectionObserver,
+      URL,
+      URLSearchParams,
+      setTimeout(fn, ms) {
+        const id = nextTimerId++;
+        timers.set(id, { fn, ms });
+        return id;
+      },
+      clearTimeout(id) {
+        timers.delete(id);
+      },
+    });
+
+    const baselineMsgListeners = winListeners.get('message')?.size || 0;
+    const sub = win.AgyShell.subscribeStateSyncEvents({
+      immediate: true,
+      conversationId: 'conv-vis',
+    });
+    assert.equal(winListeners.get('message')?.size, baselineMsgListeners + 1);
+
+    // 1. Starts hidden: zero EventSource connections opened
+    assert.equal(instances.length, 0, 'hidden frame must not open EventSource');
+    assert.equal(sub.isVisible(), false);
+
+    // 2. Document becomes visible -> opens first EventSource
+    doc.hidden = false;
+    emit(docListeners, 'visibilitychange');
+    assert.equal(sub.isVisible(), true);
+    assert.equal(instances.length, 1);
+    assert.equal(instances[0].closed, false);
+
+    // Redundant visibility events while already connected do not churn the socket
+    emit(docListeners, 'visibilitychange');
+    assert.equal(instances.length, 1);
+
+    // 3. CSS hide via IntersectionObserver closes the open EventSource AND posts /api/events/close for plugin:// proxy sockets
+    const firstCid = new URL(instances[0].url).searchParams.get('clientId');
+    assert.ok(firstCid, 'EventSource URL must include a unique clientId');
+    ioCallback([{ isIntersecting: false }]);
+    assert.equal(sub.isVisible(), false);
+    assert.equal(instances[0].closed, true);
+    assert.equal(closeFetches.length, 1);
+    assert.match(String(closeFetches[0].url), /\/api\/events\/close/);
+    assert.equal(closeFetches[0].init.keepalive, true);
+    assert.equal(closeFetches[0].init.headers['X-Sidecar-Token'], 't1');
+    assert.deepEqual(JSON.parse(closeFetches[0].init.body), { clientId: firstCid });
+
+    // Re-entering viewport opens a fresh EventSource with a new clientId
+    ioCallback([{ isIntersecting: true }]);
+    assert.equal(sub.isVisible(), true);
+    assert.equal(instances.length, 2);
+    assert.equal(instances[1].closed, false);
+    assert.notEqual(new URL(instances[1].url).searchParams.get('clientId'), firstCid);
+
+    // 4. Error schedules backoff timer (honoring sse_lease_expired retryMs); hiding via sidecar-visibility cancels pending reconnect
+    instances[1].listeners.get('sse_lease_expired')?.({ data: JSON.stringify({ retryMs: 15000 }) });
+    instances[1].onerror();
+    assert.equal(instances[1].closed, true);
+    assert.equal(timers.size, 1, 'reconnect timer scheduled while visible');
+    assert.equal([...timers.values()][0].ms, 15000, 'sse_lease_expired must set backoff delay');
+
+    emit(winListeners, 'message', {
+      source: parentWin,
+      data: { type: 'sidecar-visibility', payload: { visible: false } },
+    });
+    assert.equal(sub.isVisible(), false);
+    assert.equal(timers.size, 0, 'hiding frame must cancel pending reconnect timer');
+
+    // Untrusted message source is ignored
+    emit(winListeners, 'message', {
+      source: {},
+      data: { type: 'sidecar-visibility', payload: { visible: true } },
+    });
+    assert.equal(instances.length, 2);
+
+    // Trusted parent sidecar-visibility: true reconnects immediately
+    emit(winListeners, 'message', {
+      source: parentWin,
+      data: { type: 'sidecar-visibility', payload: { visible: true } },
+    });
+    assert.equal(sub.isVisible(), true);
+    assert.equal(instances.length, 3);
+    assert.equal(instances[2].closed, false);
+
+    // 5. Explicit close() tears down EventSource and detaches all visibility observers
+    sub.close();
+    assert.equal(instances[2].closed, true);
+    assert.equal(ioDisconnected, true);
+    assert.equal(winListeners.get('message')?.size || 0, baselineMsgListeners);
+    assert.equal(docListeners.get('visibilitychange')?.size || 0, 0);
+
+    emit(winListeners, 'message', {
+      source: parentWin,
+      data: { type: 'sidecar-visibility', payload: { visible: false } },
+    });
+    emit(winListeners, 'message', {
+      source: parentWin,
+      data: { type: 'sidecar-visibility', payload: { visible: true } },
+    });
+    assert.equal(instances.length, 3, 'closed subscription must never reconnect');
+  });
+
+  it('POST /api/events/close ends zombie plugin:// SSE streams on the server and maxSseClients caps concurrent open SSE sockets at <= 4', async () => {
+    const { StandaloneSidecarApp } = await import('../lib/server.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'kit-sse-close-'));
+    const app = new StandaloneSidecarApp({ port: 0, uiToken: 'close-tok-99' });
+    const sync = registerStateSyncRoutes(app, {
+      sidecarId: 'sse-close-test',
+      dataRoot: dir,
+      initialState: () => ({ ok: true }),
+    });
+    const server = await app.run();
+    const acList = [];
+    try {
+      const { port } = server.address();
+      const openStream = async (cid) => {
+        const ac = new AbortController();
+        acList.push(ac);
+        const res = await fetch(`http://127.0.0.1:${port}/api/events?token=close-tok-99&clientId=${cid}`, {
+          signal: ac.signal,
+        });
+        assert.equal(res.status, 200);
+        const reader = res.body.getReader();
+        const first = await reader.read();
+        assert.equal(first.done, false);
+        return reader;
+      };
+
+      const r1 = await openStream('cid-1');
+      assert.equal(sync.globalState.sseClients.size, 1);
+
+      // Unauthenticated close is rejected with 401 and leaves stream open
+      const unauthClose = await fetch(`http://127.0.0.1:${port}/api/events/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: 'cid-1' }),
+      });
+      assert.equal(unauthClose.status, 401);
+      assert.equal(sync.globalState.sseClients.size, 1);
+
+      // Authenticated close ends the server response stream immediately (EOF) even when client socket wasn't aborted
+      const okClose = await fetch(`http://127.0.0.1:${port}/api/events/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Sidecar-Token': 'close-tok-99' },
+        body: JSON.stringify({ clientId: 'cid-1' }),
+      });
+      assert.equal(okClose.status, 200);
+      assert.deepEqual(await okClose.json(), { ok: true, closed: true });
+      const eof = await r1.read();
+      assert.equal(eof.done, true, 'server must call res.end() so Electron plugin:// upstream socket closes');
+      assert.equal(sync.globalState.sseClients.size, 0);
+
+      // Opening 5 concurrent streams evicts the oldest so open SSE streams never exceed 4 (leaving >=2 of 6 HTTP/1.1 sockets free)
+      const rA = await openStream('cid-a');
+      await openStream('cid-b');
+      await openStream('cid-c');
+      await openStream('cid-d');
+      assert.equal(sync.globalState.sseClients.size, 4);
+
+      await openStream('cid-e');
+      assert.equal(sync.globalState.sseClients.size, 4, 'must cap open SSE streams at 4');
+      const dec = new TextDecoder();
+      let evictedText = '';
+      while (true) {
+        const chunk = await rA.read();
+        if (chunk.done) break;
+        evictedText += dec.decode(chunk.value, { stream: true });
+      }
+      assert.match(evictedText, /event: sse_lease_expired/);
+    } finally {
+      for (const ac of acList) ac.abort();
+      sync.dispose();
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('isolates handleNotify deduplication per conversation, honors explicit _new, and enforces auth on mutate/notify/mcp (F-02, F-09)', async () => {
@@ -533,6 +823,272 @@ describe('antigravity-sidecar-kit/state-sync SSE, mutate, notify, and MCP engine
       assert.equal(sseRes.statusCode, 200);
     } finally {
       sync.dispose();
+      rmSync(tmpBrain, { recursive: true, force: true });
+    }
+  });
+
+  it('startStdioMcpBridge forwards to live HTTP /mcp with token, suppresses notification replies, handles ping, blocks SSRF, and falls back offline cleanly', async () => {
+    const { PassThrough } = await import('node:stream');
+    const stateMod = await import('../lib/state-sync.mjs');
+    const { StandaloneSidecarApp } = await import('../lib/server.mjs');
+    assert.equal(typeof stateMod.startStdioMcpBridge, 'function');
+
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'kit-mcp-bridge-'));
+    const tmpBrain = mkdtempSync(join(tmpdir(), 'kit-mcp-brain-'));
+    const toolDefs = [
+      {
+        name: 'add_item',
+        description: 'Appends an item to state',
+        inputSchema: { type: 'object', properties: { label: { type: 'string' } } },
+        handler: async (args, { currentState }) => {
+          const items = [...(currentState.items || []), String(args.label || 'item')];
+          const count = (Number(currentState.count) || 0) + 1;
+          return { patch: { items, count }, result: { ok: true, count, items } };
+        },
+      },
+    ];
+
+    let app = new StandaloneSidecarApp({ port: 0, uiToken: 'mcp-bridge-tok' });
+    let sync = registerStateSyncRoutes(app, {
+      sidecarId: 'bridge-sc',
+      dataRoot: tmpRoot,
+      initialState: { items: [], count: 0 },
+      mcpTools: toolDefs,
+    });
+    let bridge = null;
+    const sseAbort = new AbortController();
+
+    try {
+      const server = await app.run();
+      const port = server.address().port;
+
+      // Connect live SSE listener to confirm stdio MCP mutations broadcast to UI
+      const sseEvents = [];
+      const sseRes = await fetch(`http://127.0.0.1:${port}/api/events?token=mcp-bridge-tok`, {
+        signal: sseAbort.signal,
+      });
+      assert.equal(sseRes.status, 200);
+      const sseReader = sseRes.body.getReader();
+      const dec = new TextDecoder();
+      let sseBuf = '';
+      const pumpSse = (async () => {
+        try {
+          while (true) {
+            const { value, done } = await sseReader.read();
+            if (done) break;
+            sseBuf += dec.decode(value, { stream: true });
+            let idx;
+            while ((idx = sseBuf.indexOf('\n\n')) !== -1) {
+              const block = sseBuf.slice(0, idx);
+              sseBuf = sseBuf.slice(idx + 2);
+              const dataLine = block.split('\n').find((l) => l.startsWith('data: '));
+              if (dataLine) sseEvents.push(JSON.parse(dataLine.slice(6)));
+            }
+          }
+        } catch {}
+      })();
+
+      const waitUntil = async (pred, timeoutMs = 2000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          if (pred()) return;
+          await new Promise((r) => setTimeout(r, 15));
+        }
+        throw new Error('Timed out waiting for condition');
+      };
+      await waitUntil(() => sseEvents.length >= 1);
+
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const outLines = [];
+      let outBuf = '';
+      output.on('data', (chunk) => {
+        outBuf += chunk.toString('utf8');
+        let idx;
+        while ((idx = outBuf.indexOf('\n')) !== -1) {
+          const line = outBuf.slice(0, idx).trim();
+          outBuf = outBuf.slice(idx + 1);
+          if (line) outLines.push(JSON.parse(line));
+        }
+      });
+
+      bridge = stateMod.startStdioMcpBridge({
+        sidecarId: 'bridge-sc',
+        dataRoot: tmpRoot,
+        initialState: { items: [], count: 0 },
+        mcpTools: toolDefs,
+        forwardTimeoutMs: 400,
+        input,
+        output,
+      });
+
+      // 1. Online: initialize + notification (must emit ZERO reply) + ping + tools/list + tools/call
+      input.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n');
+      input.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+      input.write('{"jsonrpc":"2.0","id":2,"method":"ping"}\n');
+      input.write('{"jsonrpc":"2.0","id":3,"method":"tools/list"}\n');
+      input.write('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"add_item","arguments":{"label":"online-1"}}}\n');
+
+      await waitUntil(() => outLines.length >= 4);
+      assert.equal(outLines.length, 4, 'notifications/initialized must NOT emit a stdout response line');
+      assert.equal(outLines[0].id, 1);
+      assert.ok(outLines[0].result.protocolVersion);
+      assert.deepEqual(outLines[1], { jsonrpc: '2.0', id: 2, result: {} });
+      assert.equal(outLines[2].id, 3);
+      assert.ok(outLines[2].result.tools.some((t) => t.name === 'get_state'));
+      assert.ok(outLines[2].result.tools.some((t) => t.name === 'add_item'));
+      assert.equal(outLines[3].id, 4);
+      assert.deepEqual(outLines[3].result.structuredContent, { ok: true, count: 1, items: ['online-1'] });
+
+      // Live StateSync and SSE client must reflect the forwarded MCP tool mutation
+      assert.deepEqual(sync.getState(), { items: ['online-1'], count: 1 });
+      await waitUntil(() => sseEvents.some((e) => e.count === 1));
+
+      // 2. Stop live server AND plant a stale dead-port server_info.json (simulating SIGKILL crash)
+      sseAbort.abort();
+      await pumpSse;
+      sync.dispose();
+      sync = null;
+      await app.close();
+      app = null;
+
+      writeServerInfo({ sidecarId: 'bridge-sc', dataRoot: tmpRoot, port: 1, token: 'stale-tok' });
+
+      input.write('{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"add_item","arguments":{"label":"offline-2"}}}\n');
+      await waitUntil(() => outLines.length >= 5);
+      assert.equal(outLines[4].id, 5);
+      assert.deepEqual(outLines[4].result.structuredContent, {
+        ok: true,
+        count: 2,
+        items: ['online-1', 'offline-2'],
+      });
+
+      // External disk edit while offline must be picked up on next offline get_state call
+      const diskStatePath = join(tmpRoot, 'bridge-sc', 'state.json');
+      writeFileSync(diskStatePath, JSON.stringify({ items: ['online-1', 'offline-2', 'disk-3'], count: 99 }), 'utf8');
+
+      input.write('{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_state","arguments":{}}}\n');
+      await waitUntil(() => outLines.length >= 6);
+      const offlineState = JSON.parse(outLines[5].result.content[0].text);
+      assert.equal(offlineState.state.count, 99);
+      assert.deepEqual(offlineState.state.items, ['online-1', 'offline-2', 'disk-3']);
+
+      // 3. Malformed JSON line emits -32700 Parse error without crashing subsequent lines
+      input.write('{broken-json\n');
+      input.write('{"jsonrpc":"2.0","id":7,"method":"ping"}\n');
+      await waitUntil(() => outLines.length >= 8);
+      assert.equal(outLines[6].error.code, -32700);
+      assert.equal(outLines[6].id, null);
+      assert.deepEqual(outLines[7], { jsonrpc: '2.0', id: 7, result: {} });
+
+      // 4. SSRF guard: non-loopback host in server_info.json must NEVER call fetchFn
+      let ssrfFetchCalled = false;
+      writeFileSync(
+        join(tmpRoot, 'bridge-sc', 'server_info.json'),
+        JSON.stringify({ host: 'evil.example.com', port: 443, token: 'leaked-secret' }),
+        'utf8'
+      );
+      const ssrfBridge = stateMod.startStdioMcpBridge({
+        sidecarId: 'bridge-sc',
+        dataRoot: tmpRoot,
+        mcpTools: toolDefs,
+        fetchFn: async () => {
+          ssrfFetchCalled = true;
+          throw new Error('SSRF fetch should not be called');
+        },
+        input: new PassThrough(),
+        output: new PassThrough(),
+      });
+      const ssrfReply = await ssrfBridge.routeRequest({ jsonrpc: '2.0', id: 8, method: 'ping' });
+      assert.equal(ssrfFetchCalled, false, 'non-loopback host in server_info.json must be rejected');
+      assert.deepEqual(ssrfReply, { jsonrpc: '2.0', id: 8, result: {} });
+      ssrfBridge.close();
+
+      // 5. Piped batch mode + perConversation offline brainDir persistence
+      const batchIn = new PassThrough();
+      const batchOut = new PassThrough();
+      let batchText = '';
+      batchOut.on('data', (c) => { batchText += c.toString('utf8'); });
+      const convId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const convBridge = stateMod.startStdioMcpBridge({
+        sidecarId: 'scoped-sc',
+        dataRoot: tmpRoot,
+        brainDir: tmpBrain,
+        perConversation: true,
+        initialState: { items: [], count: 0 },
+        mcpTools: toolDefs,
+        input: batchIn,
+        output: batchOut,
+      });
+      batchIn.write(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 9,
+          method: 'tools/call',
+          params: {
+            name: 'add_item',
+            arguments: { label: 'scoped-item' },
+            _meta: { [MCP_CONV_META_KEY]: convId },
+          },
+        }) + '\n'
+      );
+      batchIn.end();
+      await convBridge.closed;
+      const batchParsed = JSON.parse(batchText.trim());
+      assert.equal(batchParsed.id, 9);
+      assert.deepEqual(batchParsed.result.structuredContent, { ok: true, count: 1, items: ['scoped-item'] });
+      const scopedFile = join(tmpBrain, convId, 'scratch', 'sidecars', 'scoped-sc', 'state.json');
+      assert.equal(existsSync(scopedFile), true);
+      assert.deepEqual(JSON.parse(readFileSync(scopedFile, 'utf8')), { items: ['scoped-item'], count: 1 });
+
+      // 6. Offline bridge must NOT fail with Unauthorized when ANTIGRAVITY_SIDECAR_UI_TOKEN is set in process.env,
+      //    supports JSON-RPC batch arrays, and resolves pluginName nested data layout
+      const prevEnvTok = process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+      process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = 'global-env-ui-token';
+      try {
+        const pluginIn = new PassThrough();
+        const pluginOut = new PassThrough();
+        const pluginLines = [];
+        let pBuf = '';
+        pluginOut.on('data', (c) => {
+          pBuf += c.toString('utf8');
+          let idx;
+          while ((idx = pBuf.indexOf('\n')) !== -1) {
+            const l = pBuf.slice(0, idx).trim();
+            pBuf = pBuf.slice(idx + 1);
+            if (l) pluginLines.push(JSON.parse(l));
+          }
+        });
+        const pluginBridge = stateMod.startStdioMcpBridge({
+          pluginName: 'acme-plugin',
+          sidecarId: 'viewer',
+          dataRoot: tmpRoot,
+          initialState: { items: [], count: 0 },
+          mcpTools: toolDefs,
+          input: pluginIn,
+          output: pluginOut,
+        });
+        pluginIn.write('[{"jsonrpc":"2.0","id":10,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"}]\n');
+        pluginIn.write('[]\n');
+        pluginIn.write('{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"add_item","arguments":{"label":"plugin-item"}}}\n');
+        pluginIn.end();
+        await pluginBridge.closed;
+
+        assert.deepEqual(pluginLines[0], [{ jsonrpc: '2.0', id: 10, result: {} }]);
+        assert.equal(pluginLines[1].error.code, -32600);
+        assert.equal(pluginLines[2].id, 11);
+        assert.deepEqual(pluginLines[2].result.structuredContent, { ok: true, count: 1, items: ['plugin-item'] });
+        assert.equal(existsSync(join(tmpRoot, 'acme-plugin', 'viewer', 'data', 'state.json')), true);
+      } finally {
+        if (prevEnvTok === undefined) delete process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+        else process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = prevEnvTok;
+      }
+    } finally {
+      sseAbort.abort();
+      bridge?.close?.();
+      sync?.dispose?.();
+      if (app) await app.close();
+      rmSync(tmpRoot, { recursive: true, force: true });
       rmSync(tmpBrain, { recursive: true, force: true });
     }
   });

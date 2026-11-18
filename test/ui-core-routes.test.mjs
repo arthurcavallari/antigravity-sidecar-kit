@@ -84,23 +84,43 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.ok(createUiJsHandler()().body.includes('reconcileTabStrip'));
 
     const tabsCss = readModuleCss('tabs');
-    assert.ok(tabsCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));'));
+    assert.ok(tabsCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-lg, 0.5rem));'));
     assert.ok(tabsCss.includes('background: none;'));
-    assert.ok(tabsCss.includes('mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent calc(100% - 18px));'));
+    assert.ok(tabsCss.includes('mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent calc(100% - 16px));'));
+    assert.ok(tabsCss.includes('mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent calc(100% - 6px));'));
     assert.ok(tabsCss.includes(':has(> :is(.agy-tab-badge, .agy-tab-ext-badge):not(.hidden))'));
-    assert.match(tabsCss, /\.agy-tab-close\s*\{[^}]*min-width:\s*22px;[^}]*min-height:\s*22px;/s);
+    assert.match(
+      tabsCss,
+      /\.agy-tab-close\s*\{[^}]*width:\s*19px;[^}]*height:\s*19px;[^}]*min-width:\s*19px;[^}]*min-height:\s*19px;[^}]*padding:\s*0;[^}]*border-radius:\s*9999px;/s
+    );
+    assert.match(tabsCss, /\.agy-tab-close-wrap\s*\{[^}]*padding-left:\s*12px;[^}]*padding-right:\s*4\.5px;/s);
     assert.ok(tabsCss.includes('mask-image: none;'));
     assert.equal(tabsCss.includes('calc(100% - 14px)'), false);
     assert.equal(tabsCss.includes('linear-gradient(to right, transparent 0%, var(--agy-hover) 25%)'), false);
     assert.equal(tabsCss.includes('linear-gradient(to right, transparent 0%, var(--agy-control) 25%)'), false);
     const tabDragCss = readModuleCss('tab-drag');
-    assert.ok(tabDragCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-pill, 9999px));'));
+    assert.ok(tabDragCss.includes('border-radius: var(--nux-radius-pill, var(--agy-radius-lg, 0.5rem));'));
     assert.equal(tabDragCss.includes('border-radius: var(--radius-lg, 0.5rem);'), false);
     assert.ok(tabsCss.includes('.agy-tab:focus-visible'));
     assert.ok(tabsCss.includes('.agy-tab-pin:focus-visible'));
     assert.ok(tabsCss.includes('.agy-tab-close:focus-visible'));
     assert.ok(tabsCss.includes('.agy-tab-overflow-item:focus-visible'));
     assert.ok(tabsCss.includes('.agy-toggle-item:focus-visible:not(:disabled)'));
+    assert.match(tabsCss, /\.agy-tab-strip-sub\s*\{[^}]*height:\s*30px;[^}]*min-height:\s*30px;/s);
+    assert.match(
+      tabsCss,
+      /\.agy-tab-strip-sub \.agy-tab\.active::after\s*\{[^}]*left:\s*8px;[^}]*right:\s*8px;[^}]*height:\s*2px;[^}]*border-radius:\s*0;/s
+    );
+    assert.match(
+      tabsCss,
+      /\.agy-tab-strip-sub :is\(\.agy-tab-add, \.agy-tab-add-btn, \.agy-icon-btn\.agy-tab-add, \.agy-icon-btn\.agy-tab-add-btn\)\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/s
+    );
+    const layoutCss = readModuleCss('layout');
+    assert.match(
+      layoutCss,
+      /\.agy-chrome-bar\s*\{[^}]*height:\s*36px;[^}]*min-height:\s*36px;[^}]*background:\s*var\(--agy-canvas\);[^}]*box-shadow:\s*inset 0 -0\.5px 0 0 var\(--agy-card-edge, var\(--agy-rule\)\);/s
+    );
+    assert.equal(layoutCss.includes('.agy-chrome-bar .agy-tab.active'), false);
     assert.ok(controlsRouteCss.includes('.agy-icon-btn:focus-visible:not(:disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-btn:focus-visible:not(:disabled)'));
     assert.ok(controlsRouteCss.includes('.agy-switch:focus-visible:not(:disabled):not(.disabled)'));
@@ -116,8 +136,8 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.match(controlsRouteCss, /\.agy-search-box\s*>\s*svg,\s*\.agy-search-icon\s*\{[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);/s);
     assert.equal(controlsRouteCss.includes('.agy-search-box svg'), false);
 
-    // Components match Antigravity 2.29's own: buttons default to its "sm" size, with its xs/md/lg sizes
-    assert.match(controlsRouteCss, /\.agy-btn\s*\{[^}]*height:\s*28px;[^}]*padding:\s*0 10px;[^}]*font-size:\s*var\(--text-sm/s);
+    // Components match Antigravity 2.31's own: buttons default to its "sm" size (14px --text-base), with xs/md/lg sizes
+    assert.match(controlsRouteCss, /\.agy-btn\s*\{[^}]*height:\s*28px;[^}]*padding:\s*0 10px;[^}]*font-size:\s*var\(--text-base/s);
     assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-xs\s*\{[^}]*height:\s*24px;/s);
     assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-md\s*\{[^}]*height:\s*32px;/s);
     assert.match(controlsRouteCss, /\.agy-btn\.agy-btn-lg\s*\{[^}]*height:\s*36px;/s);
@@ -126,12 +146,16 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     const surfacesCss = readModuleCss('surfaces');
     assert.match(surfacesCss, /\.agy-card\s*\{[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--agy-card\);/s, 'cards: the 16px radius and the card fill');
     assert.match(surfacesCss, /\.agy-badge\s*\{[^}]*font-weight:\s*var\(--font-weight-normal, 400\);[^}]*background:\s*var\(--agy-sunken\);/s);
-    assert.match(readModuleCss('overlays'), /\.agy-banner\s*\{[^}]*padding:\s*10px 12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*font-size:\s*var\(--text-sm[^}]*background:\s*var\(--agy-card\);/s, 'banners match the callout');
+    assert.match(readModuleCss('overlays'), /\.agy-banner\s*\{[^}]*padding:\s*10px 12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*font-size:\s*var\(--text-base[^}]*background:\s*var\(--agy-card\);/s, 'banners match the callout');
     assert.match(
       readModuleCss('overlays'),
-      /\.agy-toast\s*\{[^}]*max-width:\s*24rem;[^}]*padding:\s*12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--glass, var\(--agy-card\)\);[^}]*font-size:\s*var\(--text-sm/s,
+      /\.agy-toast\s*\{[^}]*max-width:\s*24rem;[^}]*padding:\s*12px;[^}]*border-radius:\s*var\(--nux-radius-lg[^}]*background:\s*var\(--glass, var\(--agy-card\)\);[^}]*font-size:\s*var\(--text-base/s,
       'toasts match the native toast',
     );
+    assert.match(readModuleCss('tabs'), /\.agy-tab\s*\{[^}]*font-size:\s*var\(--text-compact,\s*0\.8125rem\)/s);
+    assert.match(readModuleCss('overlays'), /\.agy-context-menu-item\s*\{[^}]*font-size:\s*var\(--text-compact,\s*0\.8125rem\)/s);
+    assert.equal(AGY_UI_CSS.includes('var(--text-sm, 0.875rem)'), false);
+    assert.equal(AGY_UI_CSS.includes('var(--text-xs, 0.75rem)'), false);
     assert.ok(readModuleCss('overlays').includes('.agy-context-menu-item:focus-visible:not(:disabled)'));
     assert.ok(readModuleCss('layout').includes(':is(agy-split-sash, .agy-split-sash):focus-visible .sash-line'));
   });
@@ -401,9 +425,21 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     await domWin.AgyShell.notifyAgent('hello from direct iframe');
     assert.equal(captured[0].init.headers['X-Sidecar-Token'], 'direct-tok-777');
 
+    // KIT-04: notifyAgent awaits window.sidecar.getWorkspaceUris() and prefers it over stale window.sidecar.workspace
+    domWin.sidecar = {
+      conversationId: '_new',
+      workspace: 'file:///stale-legacy-prop',
+      getWorkspaceUris: async () => ['file:///workspace/from-bridge'],
+    };
+    await domWin.AgyShell.notifyAgent('hello from _new pane', '_new', 'Alert');
+    const newBody = JSON.parse(captured[1].init.body);
+    assert.equal(newBody.conversationId, '_new');
+    assert.equal(newBody.workspace, 'file:///workspace/from-bridge');
+    delete domWin.sidecar;
+
     const iframeUi = attachAgyUI(domWin);
     await iframeUi.apiCall('/api/mutate', { a: 1 });
-    assert.equal(captured[1].init.headers['X-Sidecar-Token'], 'direct-tok-777');
+    assert.equal(captured[2].init.headers['X-Sidecar-Token'], 'direct-tok-777');
 
     assert.equal(enforceSidecarToken({ headers: { 'X-Sidecar-Token': ['direct-tok-777'] } }, 'direct-tok-777'), true);
     assert.equal(enforceSidecarToken({ req: { url: '/page?token=direct-tok-777', headers: {} } }, 'direct-tok-777'), true);
@@ -422,6 +458,40 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     );
     assert.deepEqual(JSON.parse(JSON.stringify(forwardedToParent)), [
       { msg: { type: 'agy:shortcut-forwarded', dir: -1, repeat: false }, targetOrigin: '*' },
+    ]);
+
+    // KIT-12: In native Antigravity Aux Pane (top-level iframe on plugin://, window.parent === window.top),
+    // tab-cycle chords must NOT stopPropagation so preload.js on window emits sidecar-key-event
+    const nativeWindowBubbled = [];
+    domWin.top = domWin.parent;
+    domWin.location = {
+      href: 'plugin://context-monitor-52000/?token=direct-tok-777',
+      search: '?token=direct-tok-777',
+      protocol: 'plugin:',
+    };
+    domWin.addEventListener('keydown', (e) => {
+      nativeWindowBubbled.push({ key: e.key, defaultPrevented: e.defaultPrevented });
+    });
+    domDoc.documentElement.dispatchEvent(
+      new domWin.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, shiftKey: false, bubbles: true, cancelable: true })
+    );
+    assert.equal(forwardedToParent.length, 1, 'native Aux Pane must not intercept with agy:shortcut-forwarded');
+    assert.deepEqual(nativeWindowBubbled, [{ key: 'Tab', defaultPrevented: false }]);
+
+    // KIT-17: Host bridge wrappers on AgyShell (toggleAuxPane, toggleConversation { split }, addArtifactComment)
+    domWin.AgyShell.toggleAuxPane({ open: true });
+    domWin.AgyShell.toggleConversation('conv-99', { split: true });
+    domWin.AgyShell.addArtifactComment({ uri: 'file:///a.md', comment: 'nit', pageTitle: 'Doc' });
+    assert.deepEqual(JSON.parse(JSON.stringify(forwardedToParent.slice(1))), [
+      { msg: { type: 'toggle-aux-pane', payload: { open: true } }, targetOrigin: '*' },
+      { msg: { type: 'toggle-conversation', payload: { conversationId: 'conv-99', split: true } }, targetOrigin: '*' },
+      {
+        msg: {
+          type: 'add-artifact-comment',
+          payload: { uri: 'file:///a.md', comment: 'nit', pageTitle: 'Doc' },
+        },
+        targetOrigin: '*',
+      },
     ]);
   });
 });

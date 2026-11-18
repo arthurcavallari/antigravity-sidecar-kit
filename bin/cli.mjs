@@ -9,7 +9,7 @@ import { lintPluginOrSidecar } from '../lib/manifest-validator.mjs';
 
 const USAGE = [
   'Usage:',
-  '  npx antigravity-sidecar-kit init <sidecar-name> [--dir <target-dir>] [--force]',
+  '  npx antigravity-sidecar-kit init <sidecar-name> [--dir <target-dir>] [--entrypoint <aux_pane|sidebar|full_pane>] [--hide-title-bar] [--force]',
   '  npx antigravity-sidecar-kit lint [--fix] [--json] [--strict] [dir]',
 ].join('\n');
 
@@ -64,12 +64,26 @@ if (rawArgs[0] === 'lint') {
 let name = '';
 let targetDir = '';
 let force = false;
+let entrypoint = 'aux_pane';
+let hideTitleBar = false;
 
 for (let i = 0; i < rawArgs.length; i++) {
   const arg = rawArgs[i];
   if (arg === 'init') continue;
   if (arg === '--force' || arg === '-f') {
     force = true;
+    continue;
+  }
+  if (arg === '--hide-title-bar') {
+    hideTitleBar = true;
+    continue;
+  }
+  if (arg.startsWith('--entrypoint=')) {
+    entrypoint = arg.slice('--entrypoint='.length);
+    continue;
+  }
+  if (arg === '--entrypoint') {
+    entrypoint = rawArgs[++i] ?? '';
     continue;
   }
   if (arg.startsWith('--dir=')) {
@@ -91,7 +105,7 @@ if (!name) {
 }
 
 try {
-  const res = scaffoldSidecarProject({ name, targetDir, force });
+  const res = scaffoldSidecarProject({ name, targetDir, force, entrypoint, hideTitleBar });
   const rel = relative(process.cwd(), res.outDir);
   const cdPath = !rel ? '.' : rel.startsWith('..') || isAbsolute(rel) ? res.outDir : rel;
   console.log(`[antigravity-sidecar-kit] Scaffolded ${res.pkgName} at ${res.outDir}`);

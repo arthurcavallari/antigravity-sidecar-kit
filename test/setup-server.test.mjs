@@ -201,6 +201,42 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       const cfgAfterUninst = readJsonSafe(configJsonPath, {});
       assert.equal(cfgAfterUninst.sidecars['my-custom-tool'].enabled, false);
       assert.equal(cfgAfterUninst.sidecars['my-custom-tool'].projectId, 'keep-this-project-id');
+
+      // KIT-06: ManageSidecar(ENABLE) returning "project name already exists" must treat sidecar as registered without SIGTERMing PID
+      const rpcCalls = [];
+      let firstRestart = true;
+      const reEnableRes = await runSidecarSetup({
+        sidecarId: 'my-custom-tool',
+        repoRoot: scaffoldDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+        execFn: () => assert.fail('must not fall through to process kill when project name already exists'),
+        rpcOptions: {
+          lsAddress: '127.0.0.1:50500',
+          csrfToken: 'tok-ls',
+          sidecarDataRoot: join(dir, 'sidecar_data'),
+          fetchFn: async (url, init) => {
+            const method = url.split('/').pop();
+            const body = JSON.parse(init.body || '{}');
+            rpcCalls.push({ method, body });
+            if (method === 'ManageSidecar' && body.action === 'SIDECAR_ACTION_RESTART' && firstRestart) {
+              firstRestart = false;
+              return { ok: false, status: 400, text: async () => JSON.stringify({ message: 'sidecar disabled' }) };
+            }
+            if (method === 'ManageSidecar' && body.action === 'SIDECAR_ACTION_ENABLE') {
+              return { ok: false, status: 500, text: async () => JSON.stringify({ message: 'project name already exists' }) };
+            }
+            return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) };
+          },
+        },
+      });
+      assert.equal(reEnableRes.rpcRes.notified, true);
+      assert.equal(reEnableRes.rpcRes.alreadyRegistered, true);
+      assert.equal(rpcCalls.length, 3);
+      assert.equal(rpcCalls[2].body.action, 'SIDECAR_ACTION_RESTART');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -436,6 +472,276 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       assert.match(renderedHtml, /href="\/agy\.css\?v=1&token=tok-q12&v=99"/);
       assert.match(renderedHtml, /src='\/shell\.js\?token=tok-q12&v=99#init'/);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('StandaloneSidecarApp & createSidecarApp boot without host env vars, enforce GET+POST API token/origin/body limits, and run async agentapi routes', async () => {
+    const srvMod = await import('../lib/server.mjs');
+    assert.equal(typeof srvMod.StandaloneSidecarApp, 'function');
+    assert.equal(typeof srvMod.createSidecarApp, 'function');
+
+    const savedEnv = {
+      ls: process.env.ANTIGRAVITY_LS_ADDRESS,
+      csrf: process.env.ANTIGRAVITY_CSRF_TOKEN,
+      port: process.env.ANTIGRAVITY_SIDECAR_WEB_PORT,
+      tok: process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN,
+    };
+    delete process.env.ANTIGRAVITY_LS_ADDRESS;
+    delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+    delete process.env.ANTIGRAVITY_SIDECAR_WEB_PORT;
+    delete process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN;
+
+    const dir = mkdtempSync(join(tmpdir(), 'kit-standalone-app-'));
+    const agentCalls = [];
+    let app;
+    let sync;
+    try {
+      writeFileSync(
+        join(dir, 'index.html'),
+        '<!doctype html><html><head><script src="/preload.js"></script><link rel="stylesheet" href="/ui.css"></head><body>hello</body></html>',
+        'utf8'
+      );
+
+      app = srvMod.createSidecarApp({
+        port: 0,
+        uiToken: 'standalone-secret',
+        bodyLimitBytes: 256,
+        projectId: 'proj-test',
+        conversationId: 'conv-default',
+        workspace: 'file:///workspace/demo',
+        agentApiFn: async (args, opts) => {
+          agentCalls.push({ args, opts });
+          if (args[0] === 'get-conversation-metadata' && args[1] === 'fail-conv') {
+            return { error: 'upstream agentapi error' };
+          }
+          return { ok: true, echoedArgs: args, projectId: opts?.projectId };
+        },
+      });
+      assert.equal(app instanceof srvMod.StandaloneSidecarApp, true);
+      assert.deepEqual(app.config, {
+        projectId: 'proj-test',
+        conversationId: 'conv-default',
+        workspace: 'file:///workspace/demo',
+      });
+
+      const setupRes = srvMod.setupSidecarServer(app, {
+        uiDir: dir,
+        uiToken: 'standalone-secret',
+        stateSyncOptions: {
+          sidecarId: 'standalone-demo',
+          dataRoot: dir,
+          initialState: { ready: true },
+        },
+      });
+      sync = setupRes.sync;
+
+      app.api(
+        '/api/secret-data',
+        async (data, ctx) => {
+          const storeCtx = srvMod.getCurrentRequestContext();
+          return {
+            seenData: data,
+            hasTokenProp: Object.prototype.hasOwnProperty.call(data, 'token'),
+            protoPolluted: Object.prototype.hasOwnProperty.call(data, 'polluted'),
+            ctxMatched: Boolean(ctx?.req && storeCtx === ctx),
+          };
+        },
+        'GET'
+      );
+
+      app.api(
+        '/api/echo-post',
+        async (data, ctx) => ({
+          data,
+          queryTag: ctx?.query?.tag || null,
+        }),
+        'POST'
+      );
+
+      const server = await app.run();
+      const port = server.address().port;
+      assert.ok(port > 0);
+      assert.equal(app.port, port);
+      const base = `http://127.0.0.1:${port}`;
+
+      // server_info.json must capture app.uiToken even when env var is unset
+      const srvInfo = JSON.parse(readFileSync(join(dir, 'standalone-demo', 'server_info.json'), 'utf8'));
+      assert.equal(srvInfo.port, port);
+      assert.equal(srvInfo.token, 'standalone-secret');
+
+      // 1. Health & preload.js require no token, support HEAD, reject non-loopback Origin
+      const healthRes = await fetch(`${base}/_sidecar/health`);
+      assert.equal(healthRes.status, 200);
+      const healthJson = await healthRes.json();
+      assert.equal(healthJson.status, 'ok');
+      assert.equal(healthJson.pid, process.pid);
+
+      const headHealth = await fetch(`${base}/_sidecar/health`, { method: 'HEAD' });
+      assert.equal(headHealth.status, 200);
+      assert.equal(await headHealth.text(), '');
+
+      const preloadRes = await fetch(`${base}/preload.js`);
+      assert.equal(preloadRes.status, 200);
+      assert.match(preloadRes.headers.get('content-type') || '', /javascript/);
+      const preloadText = await preloadRes.text();
+      assert.ok(preloadText.length > 0);
+
+      // KIT-08: resolvePreloadJs honors ANTIGRAVITY_PATH and FALLBACK_PRELOAD_JS wires UI/workspace/key postMessage
+      const fakeAgy = join(dir, 'custom-agy-install');
+      mkdirSync(join(fakeAgy, 'lib', 'node_modules', 'sidecar_sdk'), { recursive: true });
+      writeFileSync(join(fakeAgy, 'lib', 'node_modules', 'sidecar_sdk', 'preload.js'), '/* AGY_PATH_HIT */\n', 'utf8');
+      assert.match(srvMod.resolvePreloadJs({ ANTIGRAVITY_PATH: fakeAgy, USERPROFILE: dir, HOME: dir }), /AGY_PATH_HIT/);
+      assert.match(srvMod.FALLBACK_PRELOAD_JS, /toggle-conversation/);
+      assert.match(srvMod.FALLBACK_PRELOAD_JS, /add-artifact-comment/);
+      assert.match(srvMod.FALLBACK_PRELOAD_JS, /sidecar-key-event/);
+      assert.match(srvMod.FALLBACK_PRELOAD_JS, /workspace-change/);
+
+      const evilPageRes = await fetch(`${base}/`, { headers: { Origin: 'https://evil.example' } });
+      assert.equal(evilPageRes.status, 403);
+
+      // 2. Page route serves HTML with injected token and supports HEAD
+      const pageRes = await fetch(`${base}/`);
+      assert.equal(pageRes.status, 200);
+      const pageHtml = await pageRes.text();
+      assert.match(pageHtml, /token=standalone-secret/);
+
+      const headPageRes = await fetch(`${base}/`, { method: 'HEAD' });
+      assert.equal(headPageRes.status, 200);
+      assert.equal(await headPageRes.text(), '');
+
+      // 3. GET API route MUST enforce token auth (closing host sidecar_sdk GET bypass)
+      const unauthGet = await fetch(`${base}/api/secret-data?filter=active`);
+      assert.equal(unauthGet.status, 401);
+
+      const wrongGet = await fetch(`${base}/api/secret-data?token=wrong-token`);
+      assert.equal(wrongGet.status, 401);
+
+      const evilGet = await fetch(`${base}/api/secret-data`, {
+        headers: { 'X-Sidecar-Token': 'standalone-secret', Origin: 'https://evil.example' },
+      });
+      assert.equal(evilGet.status, 403);
+
+      const authGet = await fetch(`${base}/api/secret-data?filter=active&token=standalone-secret`);
+      assert.equal(authGet.status, 200);
+      const authGetBody = await authGet.json();
+      assert.deepEqual(authGetBody, {
+        seenData: { filter: 'active' },
+        hasTokenProp: false,
+        protoPolluted: false,
+        ctxMatched: true,
+      });
+
+      // 4. Method not allowed, invalid JSON, prototype pollution stripping, and 413 body limit
+      const wrongMethod = await fetch(`${base}/api/secret-data`, {
+        method: 'DELETE',
+        headers: { 'X-Sidecar-Token': 'standalone-secret' },
+      });
+      assert.equal(wrongMethod.status, 405);
+      assert.equal(wrongMethod.headers.get('allow'), 'GET');
+
+      const badJson = await fetch(`${base}/api/echo-post`, {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': 'standalone-secret', 'Content-Type': 'application/json' },
+        body: '{"broken":',
+      });
+      assert.equal(badJson.status, 400);
+
+      const tooLarge = await fetch(`${base}/api/echo-post`, {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': 'standalone-secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pad: 'x'.repeat(600) }),
+      });
+      assert.equal(tooLarge.status, 413);
+
+      const okPost = await fetch(`${base}/api/echo-post?tag=q1`, {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': 'standalone-secret', 'Content-Type': 'application/json' },
+        body: '{"keep":1,"__proto__":{"polluted":true}}',
+      });
+      assert.equal(okPost.status, 200);
+      const okPostBody = await okPost.json();
+      assert.deepEqual(okPostBody, { data: { tag: 'q1', keep: 1 }, queryTag: 'q1' });
+      assert.equal(({}).polluted, undefined);
+
+      // 5. Built-in /_sidecar/* async agentapi routes + validation + flag injection guard
+      const unauthSend = await fetch(`${base}/_sidecar/send-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: 'c1', message: 'hi' }),
+      });
+      assert.equal(unauthSend.status, 401);
+
+      const flagInjectSend = await fetch(`${base}/_sidecar/send-message`, {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': 'standalone-secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: '--help', message: 'hi' }),
+      });
+      assert.equal(flagInjectSend.status, 400);
+
+      const dashMsgSend = await fetch(`${base}/_sidecar/send-message`, {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': 'standalone-secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: 'conv-123', message: '-leading-dash', title: 'Alert' }),
+      });
+      assert.equal(dashMsgSend.status, 200);
+      assert.deepEqual(agentCalls.at(-1).args, ['send-message', '--title', 'Alert', '--', 'conv-123', '-leading-dash']);
+      assert.equal(agentCalls.at(-1).opts.projectId, 'proj-test');
+
+      const flagInjectModel = await fetch(`${base}/_sidecar/new-conversation`, {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': 'standalone-secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'hello', model: '--exec=evil' }),
+      });
+      assert.equal(flagInjectModel.status, 400);
+
+      const okNewConv = await fetch(`${base}/_sidecar/new-conversation`, {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': 'standalone-secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: '-start-dash', model: 'pro' }),
+      });
+      assert.equal(okNewConv.status, 200);
+      assert.deepEqual(agentCalls.at(-1).args, ['new-conversation', '--model', 'pro', '--', '-start-dash']);
+
+      const failMeta = await fetch(`${base}/_sidecar/get-conversation-metadata`, {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': 'standalone-secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: 'fail-conv' }),
+      });
+      assert.equal(failMeta.status, 502);
+
+      // 6. SSE /api/events enforces app.uiToken and app.close() terminates open streams cleanly
+      const unauthSse = await fetch(`${base}/api/events`);
+      assert.equal(unauthSse.status, 401);
+
+      const sseAbort = new AbortController();
+      const authSse = await fetch(`${base}/api/events?token=standalone-secret`, { signal: sseAbort.signal });
+      assert.equal(authSse.status, 200);
+
+      // 7. OPTIONS preflight echoes verified loopback origin; blocks non-loopback and literal 'null' origin; run() is idempotent
+      assert.equal(await app.run(), server);
+      const okOptions = await fetch(`${base}/api/echo-post`, {
+        method: 'OPTIONS',
+        headers: { Origin: 'http://127.0.0.1:3000' },
+      });
+      assert.equal(okOptions.status, 204);
+      assert.equal(okOptions.headers.get('access-control-allow-origin'), 'http://127.0.0.1:3000');
+
+      const nullOriginRes = await fetch(`${base}/api/secret-data`, {
+        headers: { 'X-Sidecar-Token': 'standalone-secret', Origin: 'null' },
+      });
+      assert.equal(nullOriginRes.status, 403);
+
+      await app.close();
+      sseAbort.abort();
+      app = null;
+    } finally {
+      sync?.dispose?.();
+      if (app) await app.close();
+      if (savedEnv.ls !== undefined) process.env.ANTIGRAVITY_LS_ADDRESS = savedEnv.ls;
+      if (savedEnv.csrf !== undefined) process.env.ANTIGRAVITY_CSRF_TOKEN = savedEnv.csrf;
+      if (savedEnv.port !== undefined) process.env.ANTIGRAVITY_SIDECAR_WEB_PORT = savedEnv.port;
+      if (savedEnv.tok !== undefined) process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = savedEnv.tok;
       rmSync(dir, { recursive: true, force: true });
     }
   });

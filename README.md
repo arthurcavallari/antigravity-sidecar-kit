@@ -3,6 +3,7 @@
 <p>
   <a href="https://www.npmjs.com/package/antigravity-sidecar-kit"><img src="https://img.shields.io/npm/v/antigravity-sidecar-kit?logo=npm&color=cb3837" alt="npm version" height="20"></a>
   <a href="https://github.com/arthurcavallari/antigravity-sidecar-kit/actions/workflows/test.yml"><img src="https://github.com/arthurcavallari/antigravity-sidecar-kit/actions/workflows/test.yml/badge.svg" alt="Tests" height="20"></a>
+  <img src="https://img.shields.io/badge/Antigravity-2.0%E2%80%932.32.2-4285F4?logo=google&logoColor=white" alt="Antigravity 2.0–2.32.2" height="20">
   <img src="https://img.shields.io/node/v/antigravity-sidecar-kit?logo=nodedotjs&logoColor=white&color=339933" alt="Node.js version" height="20">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" height="20"></a>
   <a href="https://github.com/sponsors/arthurcavallari"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub" height="20"></a>
@@ -27,7 +28,7 @@ npm install
 npm run setup
 ```
 
-Options: `--dir <target-dir>` to choose the output folder, `--force` to overwrite an existing scaffold.
+Options: `--dir <target-dir>` to choose the output folder, `--entrypoint <aux_pane|sidebar|full_pane>` to mount in the Auxiliary Pane (default) or left-sidebar Extensions section (`SIDECAR_UI_ENTRYPOINT_SIDEBAR`), `--hide-title-bar` to set `title_bar_style: "SIDECAR_UI_TITLE_BAR_STYLE_HIDDEN"` on standalone views, and `--force` to overwrite an existing scaffold.
 
 `npm create antigravity-sidecar` runs the [`create-antigravity-sidecar`](https://www.npmjs.com/package/create-antigravity-sidecar) launcher. `npx antigravity-sidecar-kit init my-sidecar` does the same thing.
 
@@ -141,22 +142,49 @@ const theme = resolveHostTheme();
 ---
 
 ### `antigravity-sidecar-kit/server`
-Route handlers for `SidecarApp` (`sidecar_sdk`) that inject `ANTIGRAVITY_SIDECAR_UI_TOKEN` + cache-busting timestamps into local HTML asset references (`src`/`href`) and serve the host Tailwind stylesheet with `instanceof Response` compatibility.
+Route handlers for `SidecarApp` (`sidecar_sdk`) plus `StandaloneSidecarApp` (`createSidecarApp`), a host-free drop-in replacement that boots without `ANTIGRAVITY_LS_ADDRESS` / `ANTIGRAVITY_CSRF_TOKEN` / `ANTIGRAVITY_SIDECAR_WEB_PORT`, authenticates all `app.api(...)` routes (including `GET`), enforces `bodyLimitBytes` (`413`), blocks non-loopback `Origin` headers (`403`), and runs `/_sidecar/*` `agentapi` calls asynchronously.
 
 ```js
-import { SidecarApp, Response } from 'sidecar_sdk';
-import { createAssetHandler, createAgyCssHandler } from 'antigravity-sidecar-kit/server';
+import {
+  createSidecarApp,
+  createAssetHandler,
+  createAgyCssHandler,
+  setupSidecarServer,
+} from 'antigravity-sidecar-kit/server';
 
-const app = new SidecarApp();
-const serveAsset = (rel, type) =>
-  createAssetHandler(UI_DIR, rel, type, { ResponseClass: Response });
-
-app.page('/', serveAsset('index.html', 'text/html; charset=utf-8'));
-app.page('/compiled_tailwind.css', createAgyCssHandler({ ResponseClass: Response }));
-app.page('/styles.css', serveAsset('styles.css', 'text/css; charset=utf-8'));
-app.page('/app.js', serveAsset('app.js', 'text/javascript; charset=utf-8'));
+const app = createSidecarApp(); // works inside Antigravity, standalone browser dev, and node --test
+setupSidecarServer(app, {
+  uiDir: UI_DIR,
+  stateSyncOptions: { sidecarId: 'my-sidecar' },
+});
 
 await app.run();
+```
+
+---
+
+### `antigravity-sidecar-kit/state-sync`
+Global and per-conversation `StateSync` engine (`GET /api/events` SSE, `POST /api/mutate`, `POST /api/notify`, `POST /mcp`) plus `startStdioMcpBridge` for `mcp_config.json` stdio MCP entrypoints. `startStdioMcpBridge` discovers a running sidecar's dynamic loopback port and token from `server_info.json`, forwards JSON-RPC 2.0 requests to `POST /mcp`, and falls back to offline atomic `state.json` reads/mutations when the sidecar HTTP server is not running.
+
+```js
+import { startStdioMcpBridge } from 'antigravity-sidecar-kit/state-sync';
+
+startStdioMcpBridge({
+  sidecarId: 'my-sidecar',
+  initialState: { items: [] },
+  mcpTools: [
+    {
+      name: 'add_item',
+      description: 'Append an item to sidecar state',
+      inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+      handler: async ({ text }, { currentState }) => {
+        const items = [...(currentState.items || []), text];
+        return { patch: { items }, result: { ok: true, count: items.length } };
+      },
+    },
+  ],
+  exitOnClose: true,
+});
 ```
 
 ---
