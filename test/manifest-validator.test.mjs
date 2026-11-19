@@ -504,6 +504,33 @@ describe('manifest-validator', () => {
       const sbWarns = badSb.warnings.filter((w) => w.ruleId === 'SIDECAR-SANDBOX-01');
       assert.equal(sbWarns.length, 2);
 
+      // Ancestor paths that enclose ~/.gemini/(antigravity|config) also fail bidirectional within() in checkRequestedPath
+      const ancestorSb = validateSidecarJson({
+        command: 'node',
+        args: ['server.mjs'],
+        sandbox: {
+          read_only_paths: ['/Users/alice/.gemini', '/Users/alice', '/', '/Users/alice/Projects/app', '/Users/alice/.gemini/other'],
+          read_write_paths: ['C:\\Users\\alice\\.gemini', 'C:\\'],
+        },
+      });
+      assert.equal(ancestorSb.valid, true);
+      const ancestorWarns = ancestorSb.warnings.filter((w) => w.ruleId === 'SIDECAR-SANDBOX-01');
+      assert.equal(ancestorWarns.length, 5);
+
+      // Unknown sandbox keys and duplicate snake+camel arrays are not silently ignored
+      const mixedSb = validateSidecarJson({
+        command: 'node',
+        args: ['server.mjs'],
+        sandbox: {
+          allow_network: true,
+          read_only_paths: ['/tmp/ok'],
+          readOnlyPaths: [123],
+        },
+      });
+      assert.equal(mixedSb.valid, false);
+      assert.ok(mixedSb.errors.some((e) => e.ruleId === 'SIDECAR-DRIFT-04' && e.message.includes('readOnlyPaths')));
+      assert.ok(mixedSb.warnings.some((w) => w.ruleId === 'SIDECAR-DRIFT-04' && w.message.includes('allow_network')));
+
       const tsDir = mkdtempSync(join(tmpdir(), 'kit-lint-ts-'));
       try {
         writeFileSync(
