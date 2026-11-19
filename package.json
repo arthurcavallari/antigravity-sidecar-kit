@@ -45,6 +45,7 @@
     "./hooks": "./lib/hooks.mjs",
     "./skill-router": "./lib/skill-router.mjs",
     "./binary-stream": "./lib/binary-stream.mjs",
+    "./models": "./lib/model-catalog.mjs",
     "./cli": "./bin/cli.mjs"
   },
   "bin": {
