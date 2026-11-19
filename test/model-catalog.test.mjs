@@ -7,6 +7,7 @@ import {
   mergeModelCatalogSnapshots,
   parseAvailableModelsCatalog,
   stripModelFamilySlug,
+  stripModelSuffixAndVendor,
 } from '../lib/model-catalog.mjs';
 
 describe('antigravity-sidecar-kit/models dynamic model catalog', () => {
@@ -26,6 +27,13 @@ describe('antigravity-sidecar-kit/models dynamic model catalog', () => {
     assert.equal(extractThinkingEffort('', 'gemini-4-neon-xhigh'), 'XHigh');
     assert.equal(cleanModelBadgeLabel('', 'gemini-5-xenon-minimal'), 'Gemini 5 Xenon (Minimal)');
     assert.equal(stripModelFamilySlug('gemini-5-helium-tiered-xhigh'), 'gemini-5-helium');
+
+    // Linear-time hostile input guard against polynomial regex backtracking
+    const t0 = performance.now();
+    assert.equal(extractThinkingEffort(`${' '.repeat(50_000)}(Nope)`, 'x'), '');
+    assert.equal(stripModelSuffixAndVendor(`Gemini ${' '.repeat(50_000)}(Nope)`), `${' '.repeat(0)}(Nope)`);
+    assert.equal(stripModelFamilySlug(`gemini${'-tiered-'.repeat(10_000)}x`), 'gemini');
+    assert.ok(performance.now() - t0 < 200);
   });
 
   it('auto-detects flagship vs fast families, checkpointer ceilings, and hidden tiered models for arbitrary future codenames', () => {
