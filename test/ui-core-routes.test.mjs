@@ -478,10 +478,11 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.equal(forwardedToParent.length, 1, 'native Aux Pane must not intercept with agy:shortcut-forwarded');
     assert.deepEqual(nativeWindowBubbled, [{ key: 'Tab', defaultPrevented: false }]);
 
-    // KIT-17: Host bridge wrappers on AgyShell (toggleAuxPane, toggleConversation { split }, addArtifactComment)
+    // KIT-17 & 2.33.0 SDK: Host bridge wrappers on AgyShell (toggleAuxPane, toggleConversation { split }, addArtifactComment, requestCredentialRefresh)
     domWin.AgyShell.toggleAuxPane({ open: true });
     domWin.AgyShell.toggleConversation('conv-99', { split: true });
     domWin.AgyShell.addArtifactComment({ uri: 'file:///a.md', comment: 'nit', pageTitle: 'Doc' });
+    assert.equal(domWin.AgyShell.requestCredentialRefresh(), true);
     assert.deepEqual(JSON.parse(JSON.stringify(forwardedToParent.slice(1))), [
       { msg: { type: 'toggle-aux-pane', payload: { open: true } }, targetOrigin: '*' },
       { msg: { type: 'toggle-conversation', payload: { conversationId: 'conv-99', split: true } }, targetOrigin: '*' },
@@ -492,6 +493,7 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
         },
         targetOrigin: '*',
       },
+      { msg: { type: 'request-credential-refresh' }, targetOrigin: '*' },
     ]);
   });
 });

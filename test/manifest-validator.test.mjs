@@ -472,5 +472,65 @@ describe('manifest-validator', () => {
         rmSync(kit11Dir, { recursive: true, force: true });
       }
     });
+
+    it('validates 2.33.0 SidecarSandboxConfig fields and TypeScript (.ts/.mts) sidecar & hook entrypoints', () => {
+      const okSb = validateSidecarJson({
+        command: 'node',
+        args: ['server.mts'],
+        sandbox: {
+          disable_sandbox: false,
+          allow_full_network: false,
+          allowed_hosts: ['api.example.com'],
+          read_only_paths: ['/opt/shared-data'],
+          read_write_paths: ['C:\\Temp\\sidecar-cache'],
+        },
+      });
+      assert.equal(okSb.valid, true);
+      assert.equal(okSb.warnings.length, 0);
+
+      const badSb = validateSidecarJson({
+        command: 'node',
+        args: ['server.mjs'],
+        sandbox: {
+          disable_sandbox: 'yes',
+          allow_full_network: 1,
+          allowed_hosts: [''],
+          read_only_paths: ['~/.gemini/antigravity'],
+          read_write_paths: ['/Users/alice/.gemini/config/plugins'],
+        },
+      });
+      assert.equal(badSb.valid, false);
+      assert.equal(badSb.errors.length, 3);
+      const sbWarns = badSb.warnings.filter((w) => w.ruleId === 'SIDECAR-SANDBOX-01');
+      assert.equal(sbWarns.length, 2);
+
+      const tsDir = mkdtempSync(join(tmpdir(), 'kit-lint-ts-'));
+      try {
+        writeFileSync(
+          join(tsDir, 'sidecar.json'),
+          JSON.stringify({ command: 'node', args: ['entry.mts'], sandbox: { disable_sandbox: true } })
+        );
+        writeFileSync(
+          join(tsDir, 'hooks.json'),
+          JSON.stringify({
+            hooks: {
+              PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'node ./scripts/guard.ts' }] }],
+            },
+          })
+        );
+        const missingRes = lintPluginOrSidecar(tsDir);
+        const missingWarns = missingRes.warnings.map((w) => w.ruleId);
+        assert.ok(missingWarns.includes('SIDECAR-DRIFT-04'), 'warns when entry.mts is missing');
+        assert.ok(missingWarns.includes('HOOK-SCHEMA-02'), 'warns when ./scripts/guard.ts is missing');
+
+        mkdirSync(join(tsDir, 'scripts'), { recursive: true });
+        writeFileSync(join(tsDir, 'entry.mts'), 'export {};\n');
+        writeFileSync(join(tsDir, 'scripts', 'guard.ts'), 'export {};\n');
+        const presentRes = lintPluginOrSidecar(tsDir);
+        assert.equal(presentRes.warnings.length, 0);
+      } finally {
+        rmSync(tsDir, { recursive: true, force: true });
+      }
+    });
   });
 });

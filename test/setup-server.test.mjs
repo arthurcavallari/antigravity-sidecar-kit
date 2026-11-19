@@ -17,7 +17,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonSafe, writeJsonNoBom } from '../lib/config.mjs';
 import { isRealDirectory, removeLinkOrDir, resolvePermanentLinkSource, runSidecarSetup } from '../lib/setup.mjs';
+import vm from 'node:vm';
 import {
+  FALLBACK_PRELOAD_JS,
   createAgyCssHandler,
   createAssetHandler,
   createShellClientHandler,
@@ -744,5 +746,28 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       if (savedEnv.tok !== undefined) process.env.ANTIGRAVITY_SIDECAR_UI_TOKEN = savedEnv.tok;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('FALLBACK_PRELOAD_JS exposes window.sidecar.auth.requestCredentialRefresh() for 2.33.0 parity', () => {
+    const posted = [];
+    const parentWin = { postMessage: (msg, origin) => posted.push({ msg, origin }) };
+    const win = {
+      location: { search: '?token=t1&conversationId=c1' },
+      parent: parentWin,
+      addEventListener() {},
+    };
+    vm.runInNewContext(FALLBACK_PRELOAD_JS, {
+      window: win,
+      location: win.location,
+      URLSearchParams,
+      Headers,
+      fetch: async () => ({ ok: true, json: async () => ({}) }),
+      Promise,
+    });
+    assert.equal(typeof win.sidecar?.auth?.requestCredentialRefresh, 'function');
+    win.sidecar.auth.requestCredentialRefresh();
+    assert.deepEqual(JSON.parse(JSON.stringify(posted)), [
+      { msg: { type: 'request-credential-refresh' }, origin: '*' },
+    ]);
   });
 });
