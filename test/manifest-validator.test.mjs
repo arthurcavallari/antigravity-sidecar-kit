@@ -472,5 +472,92 @@ describe('manifest-validator', () => {
         rmSync(kit11Dir, { recursive: true, force: true });
       }
     });
+
+    it('validates 2.33.0 SidecarSandboxConfig fields and TypeScript (.ts/.mts) sidecar & hook entrypoints', () => {
+      const okSb = validateSidecarJson({
+        command: 'node',
+        args: ['server.mts'],
+        sandbox: {
+          disable_sandbox: false,
+          allow_full_network: false,
+          allowed_hosts: ['api.example.com'],
+          read_only_paths: ['/opt/shared-data'],
+          read_write_paths: ['C:\\Temp\\sidecar-cache'],
+        },
+      });
+      assert.equal(okSb.valid, true);
+      assert.equal(okSb.warnings.length, 0);
+
+      const badSb = validateSidecarJson({
+        command: 'node',
+        args: ['server.mjs'],
+        sandbox: {
+          disable_sandbox: 'yes',
+          allow_full_network: 1,
+          allowed_hosts: [''],
+          read_only_paths: ['~/.gemini/antigravity'],
+          read_write_paths: ['/Users/alice/.gemini/config/plugins'],
+        },
+      });
+      assert.equal(badSb.valid, false);
+      assert.equal(badSb.errors.length, 3);
+      const sbWarns = badSb.warnings.filter((w) => w.ruleId === 'SIDECAR-SANDBOX-01');
+      assert.equal(sbWarns.length, 2);
+
+      // Ancestor paths that enclose ~/.gemini/(antigravity|config) also fail bidirectional within() in checkRequestedPath
+      const ancestorSb = validateSidecarJson({
+        command: 'node',
+        args: ['server.mjs'],
+        sandbox: {
+          read_only_paths: ['/Users/alice/.gemini', '/Users/alice', '/', '/Users/alice/Projects/app', '/Users/alice/.gemini/other'],
+          read_write_paths: ['C:\\Users\\alice\\.gemini', 'C:\\'],
+        },
+      });
+      assert.equal(ancestorSb.valid, true);
+      const ancestorWarns = ancestorSb.warnings.filter((w) => w.ruleId === 'SIDECAR-SANDBOX-01');
+      assert.equal(ancestorWarns.length, 5);
+
+      // Unknown sandbox keys and duplicate snake+camel arrays are not silently ignored
+      const mixedSb = validateSidecarJson({
+        command: 'node',
+        args: ['server.mjs'],
+        sandbox: {
+          allow_network: true,
+          read_only_paths: ['/tmp/ok'],
+          readOnlyPaths: [123],
+        },
+      });
+      assert.equal(mixedSb.valid, false);
+      assert.ok(mixedSb.errors.some((e) => e.ruleId === 'SIDECAR-DRIFT-04' && e.message.includes('readOnlyPaths')));
+      assert.ok(mixedSb.warnings.some((w) => w.ruleId === 'SIDECAR-DRIFT-04' && w.message.includes('allow_network')));
+
+      const tsDir = mkdtempSync(join(tmpdir(), 'kit-lint-ts-'));
+      try {
+        writeFileSync(
+          join(tsDir, 'sidecar.json'),
+          JSON.stringify({ command: 'node', args: ['entry.mts'], sandbox: { disable_sandbox: true } })
+        );
+        writeFileSync(
+          join(tsDir, 'hooks.json'),
+          JSON.stringify({
+            hooks: {
+              PreToolUse: [{ matcher: 'run_command', hooks: [{ type: 'command', command: 'node ./scripts/guard.ts' }] }],
+            },
+          })
+        );
+        const missingRes = lintPluginOrSidecar(tsDir);
+        const missingWarns = missingRes.warnings.map((w) => w.ruleId);
+        assert.ok(missingWarns.includes('SIDECAR-DRIFT-04'), 'warns when entry.mts is missing');
+        assert.ok(missingWarns.includes('HOOK-SCHEMA-02'), 'warns when ./scripts/guard.ts is missing');
+
+        mkdirSync(join(tsDir, 'scripts'), { recursive: true });
+        writeFileSync(join(tsDir, 'entry.mts'), 'export {};\n');
+        writeFileSync(join(tsDir, 'scripts', 'guard.ts'), 'export {};\n');
+        const presentRes = lintPluginOrSidecar(tsDir);
+        assert.equal(presentRes.warnings.length, 0);
+      } finally {
+        rmSync(tsDir, { recursive: true, force: true });
+      }
+    });
   });
 });
