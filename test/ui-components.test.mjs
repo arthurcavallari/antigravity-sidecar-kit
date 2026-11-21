@@ -1,14 +1,26 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { parseHTML } from 'linkedom';
+import { AGY_CLIENT_JS } from '../lib/shell.mjs';
 import { attachAgyUI } from '../lib/ui.mjs';
 
-function createDomEnv() {
-  const { window: win, document: doc } = parseHTML('<!DOCTYPE html><html><body></body></html>');
+function createDomEnv(options = {}) {
+  const { window: win, document: doc } = parseHTML('<!DOCTYPE html><html><head></head><body></body></html>');
   win.innerWidth = 800;
   win.innerHeight = 600;
-  const ui = attachAgyUI(win);
-  return { win, doc, ui };
+  if (options.withShell) {
+    vm.runInNewContext(AGY_CLIENT_JS, {
+      window: win,
+      document: doc,
+      URLSearchParams,
+      URL,
+      setTimeout,
+      clearTimeout,
+    });
+  }
+  const ui = options.withUi === false ? null : attachAgyUI(win);
+  return { win, doc, ui, shell: win.AgyShell };
 }
 
 function stubRect(el, rect) {
@@ -657,5 +669,388 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     sashEl.remove();
     assert.equal(doc.body.classList.contains('resizing-split'), false);
     assert.deepEqual(splitEvents, [0.5]);
+  });
+
+  it('isDownloadSandboxed detects top-level windows, cross-origin frames, and ancestor sandbox attributes', () => {
+    const { win, doc, shell } = createDomEnv({ withShell: true });
+    assert.equal(typeof shell.isDownloadSandboxed, 'function');
+
+    // Default linkedom top-level window and explicit self === top
+    assert.equal(shell.isDownloadSandboxed(win), false);
+    const topWin = {};
+    topWin.self = topWin;
+    topWin.top = topWin;
+    topWin.parent = topWin;
+    topWin.frameElement = null;
+    assert.equal(shell.isDownloadSandboxed(topWin), false);
+
+    // Cross-origin frameElement === null
+    const crossOriginNullWin = {
+      top: topWin,
+      parent: topWin,
+      frameElement: null,
+    };
+    crossOriginNullWin.self = crossOriginNullWin;
+    assert.equal(shell.isDownloadSandboxed(crossOriginNullWin), true);
+
+    // Cross-origin frameElement getter throwing SecurityError
+    const crossOriginThrowWin = {
+      top: topWin,
+      parent: topWin,
+    };
+    crossOriginThrowWin.self = crossOriginThrowWin;
+    Object.defineProperty(crossOriginThrowWin, 'frameElement', {
+      get() {
+        throw new Error('Blocked a frame with origin from accessing a cross-origin frame.');
+      },
+    });
+    assert.equal(shell.isDownloadSandboxed(crossOriginThrowWin), true);
+
+    // Ancestor <iframe sandbox="allow-scripts"> lacking allow-downloads (including nested child frame)
+    const restrictedIframe = doc.createElement('iframe');
+    restrictedIframe.setAttribute('sandbox', 'allow-scripts');
+    const midWin = {
+      top: topWin,
+      parent: topWin,
+      frameElement: restrictedIframe,
+    };
+    midWin.self = midWin;
+    assert.equal(shell.isDownloadSandboxed(midWin), true);
+
+    const unsandboxedChildIframe = doc.createElement('iframe');
+    const nestedChildWin = {
+      top: topWin,
+      parent: midWin,
+      frameElement: unsandboxedChildIframe,
+    };
+    nestedChildWin.self = nestedChildWin;
+    assert.equal(shell.isDownloadSandboxed(nestedChildWin), true, 'walks up to restricted ancestor iframe');
+
+    // Ancestor <iframe sandbox="allow-scripts allow-downloads"> permits downloads
+    const allowedIframe = doc.createElement('iframe');
+    allowedIframe.setAttribute('sandbox', 'allow-scripts allow-downloads');
+    const allowedWin = {
+      top: topWin,
+      parent: topWin,
+      frameElement: allowedIframe,
+    };
+    allowedWin.self = allowedWin;
+    assert.equal(shell.isDownloadSandboxed(allowedWin), false);
+
+    // DOMTokenList-style sandbox.contains('allow-downloads')
+    const tokenListWin = {
+      top: topWin,
+      parent: topWin,
+      frameElement: {
+        hasAttribute: (name) => name === 'sandbox',
+        sandbox: { contains: (token) => token === 'allow-downloads' },
+      },
+    };
+    tokenListWin.self = tokenListWin;
+    assert.equal(shell.isDownloadSandboxed(tokenListWin), false);
+  });
+
+  it('downloadFile opens popup synchronously before async produce() resolves in sandboxed iframe and triggers <a download>', async () => {
+    const { win, doc, shell } = createDomEnv({ withShell: true });
+    assert.equal(typeof shell.downloadFile, 'function');
+
+    // Direct (unsandboxed) path clicks temporary <a download> without calling window.open
+    let openCalls = 0;
+    win.open = () => {
+      openCalls++;
+      return null;
+    };
+    const directClicked = [];
+    doc.addEventListener('click', (e) => {
+      if (e.target?.tagName === 'A') {
+        directClicked.push({
+          download: e.target.getAttribute('download'),
+          href: e.target.getAttribute('href'),
+        });
+      }
+    });
+    const directRes = await shell.downloadFile({
+      filename: 'notes.txt',
+      produce: () => new Uint8Array([104, 105]),
+    });
+    assert.deepEqual(directRes, { ok: true, mode: 'direct' });
+    assert.equal(openCalls, 0);
+    assert.equal(directClicked.length, 1);
+    assert.equal(directClicked[0].download, 'notes.txt');
+    assert.match(directClicked[0].href, /^blob:/);
+
+    // Sandboxed iframe path: window.open('', '_blank') MUST execute synchronously before async produce() resolves
+    const topWin = {};
+    topWin.self = topWin;
+    topWin.top = topWin;
+    const iframe = doc.createElement('iframe');
+    iframe.setAttribute('sandbox', 'allow-scripts');
+    win.top = topWin;
+    win.parent = topWin;
+    win.frameElement = iframe;
+
+    const { window: popupWin, document: popupDoc } = parseHTML('<!DOCTYPE html><html><head></head><body></body></html>');
+    popupWin.closed = false;
+    popupWin.close = () => {
+      popupWin.closed = true;
+    };
+    const createdPopupUrls = [];
+    const revokedPopupUrls = [];
+    popupWin.URL = {
+      createObjectURL(blob) {
+        const u = `blob:popup/${createdPopupUrls.length + 1}-${blob.type}`;
+        createdPopupUrls.push({ url: u, blob });
+        return u;
+      },
+      revokeObjectURL(u) {
+        revokedPopupUrls.push(u);
+      },
+    };
+    const popupClicks = [];
+    popupDoc.addEventListener('click', (e) => {
+      if (e.target?.tagName === 'A') {
+        popupClicks.push({
+          download: e.target.getAttribute('download'),
+          href: e.target.getAttribute('href'),
+          text: e.target.textContent,
+        });
+      }
+    });
+
+    const events = [];
+    win.open = (url, target) => {
+      events.push(['window.open', url, target]);
+      return popupWin;
+    };
+
+    let resolveProduce;
+    const downloadPromise = shell.downloadFile({
+      filename: 'audit-report.json',
+      mimeType: 'application/json',
+      metaText: '12 KB JSON bundle',
+      produce: () => {
+        events.push(['produce:called']);
+        return new Promise((resolve) => {
+          resolveProduce = resolve;
+        });
+      },
+    });
+
+    // Synchronous assertions BEFORE produce() resolves
+    assert.deepEqual(events, [
+      ['window.open', '', '_blank'],
+      ['produce:called'],
+    ]);
+    assert.match(popupDoc.body.textContent, /Preparing audit-report\.json/);
+    assert.equal(popupClicks.length, 0);
+
+    resolveProduce('{"ok":true}');
+    const popupRes = await downloadPromise;
+    assert.deepEqual(popupRes, { ok: true, mode: 'popup' });
+    assert.equal(createdPopupUrls.length, 1);
+    assert.equal(createdPopupUrls[0].blob.type, 'application/json');
+    assert.equal(popupClicks.length, 1);
+    assert.equal(popupClicks[0].download, 'audit-report.json');
+    assert.equal(popupClicks[0].href, createdPopupUrls[0].url);
+    assert.match(popupClicks[0].text, /Download audit-report\.json/);
+
+    popupWin.dispatchEvent(new popupWin.Event('pagehide'));
+    assert.deepEqual(revokedPopupUrls, [createdPopupUrls[0].url]);
+  });
+
+  it('downloadFile closes opened popup when async produce() rejects or returns empty payload', async () => {
+    const { win, doc, shell } = createDomEnv({ withShell: true });
+    const topWin = {};
+    topWin.self = topWin;
+    topWin.top = topWin;
+    const iframe = doc.createElement('iframe');
+    iframe.setAttribute('sandbox', 'allow-scripts');
+    win.top = topWin;
+    win.parent = topWin;
+    win.frameElement = iframe;
+
+    const makePopup = () => {
+      const { window: pWin } = parseHTML('<!DOCTYPE html><html><head></head><body></body></html>');
+      pWin.closed = false;
+      pWin.closeCalls = 0;
+      pWin.close = () => {
+        pWin.closed = true;
+        pWin.closeCalls++;
+      };
+      return pWin;
+    };
+
+    let activePopup = makePopup();
+    win.open = () => activePopup;
+
+    let rejectProduce;
+    const rejectingPromise = shell.downloadFile({
+      filename: 'broken.zip',
+      produce: () =>
+        new Promise((_resolve, reject) => {
+          rejectProduce = reject;
+        }),
+    });
+    assert.equal(activePopup.closed, false, 'popup open while produce() is pending');
+
+    rejectProduce(new Error('Upstream export failed'));
+    const failedRes = await rejectingPromise;
+    assert.equal(failedRes.ok, false);
+    assert.equal(failedRes.mode, 'failed');
+    assert.equal(failedRes.error?.message, 'Upstream export failed');
+    assert.equal(activePopup.closed, true);
+    assert.equal(activePopup.closeCalls, 1);
+
+    // Empty / null payload also closes popup with no leak
+    activePopup = makePopup();
+    const emptyRes = await shell.downloadFile({
+      filename: 'empty.txt',
+      produce: async () => '',
+    });
+    assert.equal(emptyRes.ok, false);
+    assert.equal(emptyRes.mode, 'failed');
+    assert.equal(activePopup.closed, true);
+    assert.equal(activePopup.closeCalls, 1);
+  });
+
+  it('downloadFile falls back to AgyUI.openDownloadModal when popup is blocked, supporting Copy, Escape, backdrop, and Close dismissal', async () => {
+    const { win, doc, ui, shell } = createDomEnv({ withShell: true });
+    assert.equal(typeof ui.openDownloadModal, 'function');
+
+    const topWin = {};
+    topWin.self = topWin;
+    topWin.top = topWin;
+    win.top = topWin;
+    win.parent = topWin;
+    win.frameElement = null; // cross-origin / sandboxed
+
+    // Blocked popup: window.open returns null
+    win.open = () => null;
+
+    const createdUrls = [];
+    const revokedUrls = [];
+    win.URL = {
+      createObjectURL(blob) {
+        const u = `blob:modal/${createdUrls.length + 1}`;
+        createdUrls.push(u);
+        return u;
+      },
+      revokeObjectURL(u) {
+        revokedUrls.push(u);
+      },
+    };
+
+    const copiedTexts = [];
+    Object.defineProperty(win, 'navigator', {
+      configurable: true,
+      value: {
+        clipboard: {
+          async writeText(text) {
+            copiedTexts.push(text);
+          },
+        },
+      },
+    });
+
+    const triggerBtn = doc.createElement('button');
+    let triggerFocused = false;
+    triggerBtn.focus = () => {
+      triggerFocused = true;
+    };
+    doc.body.appendChild(triggerBtn);
+
+    const fallbackRes = await shell.downloadFile({
+      filename: 'session-export.md',
+      mimeType: 'text/markdown;charset=utf-8',
+      title: 'Export Session Markdown',
+      metaText: 'Popup was blocked by host frame.',
+      produce: async () => '# Session Export\nAll clear.',
+    });
+
+    assert.deepEqual(fallbackRes, { ok: true, mode: 'fallback' });
+    const dialog = doc.querySelector('[role="dialog"]');
+    assert.ok(dialog, 'modal dialog rendered in document.body');
+    assert.equal(dialog.getAttribute('aria-modal'), 'true');
+    assert.match(dialog.textContent, /Export Session Markdown/);
+    assert.match(dialog.textContent, /Popup was blocked by host frame\./);
+
+    const downloadLink = dialog.querySelector('a[download="session-export.md"]');
+    assert.ok(downloadLink);
+    assert.equal(downloadLink.getAttribute('href'), 'blob:modal/1');
+
+    const copyBtn = Array.from(dialog.querySelectorAll('button')).find((b) => /Copy/i.test(b.textContent));
+    assert.ok(copyBtn, 'Copy text button rendered for text/* payload');
+    copyBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(copiedTexts, ['# Session Export\nAll clear.']);
+
+    // Escape dismisses modal and revokes object URL
+    doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    assert.equal(doc.querySelector('[role="dialog"]'), null);
+    assert.deepEqual(revokedUrls, ['blob:modal/1']);
+
+    // application/json shows Copy text; backdrop click dismisses and revokes
+    const jsonModal = ui.openDownloadModal({
+      blob: new Blob(['{"hello":"world"}'], { type: 'application/json' }),
+      filename: 'config.json',
+    });
+    assert.equal(jsonModal.getAttribute('role'), 'dialog');
+    assert.equal(jsonModal.getAttribute('aria-modal'), 'true');
+    assert.ok(Array.from(jsonModal.querySelectorAll('button')).some((b) => b.textContent === 'Copy text'));
+    const backdrop = doc.querySelector('.agy-modal-backdrop');
+    assert.ok(backdrop);
+    backdrop.click();
+    assert.equal(doc.querySelector('[role="dialog"]'), null);
+    assert.deepEqual(revokedUrls, ['blob:modal/1', 'blob:modal/2']);
+
+    // Binary blob omits Copy text button; replacing an open modal revokes its URL and preserves original focus target
+    Object.defineProperty(doc, 'activeElement', { value: triggerBtn, configurable: true });
+    const firstModal = ui.openDownloadModal({
+      blob: new Blob(['first'], { type: 'text/plain' }),
+      filename: 'first.txt',
+    });
+    Object.defineProperty(doc, 'activeElement', { value: firstModal, configurable: true });
+    const binModal = ui.openDownloadModal({
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'application/octet-stream' }),
+      filename: 'archive.bin',
+    });
+    assert.equal(doc.querySelectorAll('[role="dialog"]').length, 1, 'replacing open modal leaves only one dialog');
+    assert.deepEqual(revokedUrls, ['blob:modal/1', 'blob:modal/2', 'blob:modal/3'], 'replaced modal immediately revokes its blob URL');
+    assert.equal(Array.from(binModal.querySelectorAll('button')).some((b) => /Copy/i.test(b.textContent)), false);
+    const closeBtn = Array.from(binModal.querySelectorAll('button')).find((b) => b.textContent === 'Close' || b.getAttribute('aria-label') === 'Close dialog');
+    assert.ok(closeBtn);
+    closeBtn.click();
+    assert.equal(doc.querySelector('[role="dialog"]'), null);
+    assert.deepEqual(revokedUrls, ['blob:modal/1', 'blob:modal/2', 'blob:modal/3', 'blob:modal/4']);
+    assert.equal(triggerFocused, true, 'focus returns to original trigger prior to replaced modal');
+
+    // Custom onFallback overrides default modal; missing UI + no onFallback resolves mode: 'failed'
+    let customCtx = null;
+    const customRes = await shell.downloadFile({
+      filename: 'custom.txt',
+      produce: () => 'abc',
+      onFallback: (ctx) => {
+        customCtx = ctx;
+      },
+    });
+    assert.deepEqual(customRes, { ok: true, mode: 'fallback' });
+    assert.equal(customCtx?.filename, 'custom.txt');
+    assert.equal(doc.querySelector('[role="dialog"]'), null);
+
+    const { win: bareWin, shell: bareShell } = createDomEnv({ withShell: true, withUi: false });
+    bareWin.AgyUI = undefined;
+    bareWin.top = topWin;
+    bareWin.parent = topWin;
+    bareWin.frameElement = null;
+    bareWin.open = () => null;
+    try {
+      const unhandledRes = await bareShell.downloadFile({
+        filename: 'orphan.txt',
+        produce: () => 'orphan',
+      });
+      assert.deepEqual(unhandledRes, { ok: false, mode: 'failed' });
+    } finally {
+      bareWin.AgyUI = ui;
+    }
   });
 });

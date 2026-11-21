@@ -194,6 +194,19 @@ window.AgyShell.toggleAuxPane({
   keepOpen: true,
   background: true,
 });
+
+// Sandbox-aware file download (popup-escape when ancestor iframe lacks allow-downloads,
+// with automatic cleanup on error and AgyUI.openDownloadModal fallback if popups are blocked)
+if (window.AgyShell.isDownloadSandboxed()) {
+  // true inside cross-origin or sandboxed Auxiliary Pane / Sidebar iframes
+}
+await window.AgyShell.downloadFile({
+  filename: 'session-export.md',
+  mimeType: 'text/markdown;charset=utf-8',
+  title: 'Export Session Markdown',
+  metaText: 'Markdown snapshot of the active conversation',
+  produce: async () => fetchMarkdownExport(), // window.open('', '_blank') runs synchronously before produce()
+});
 ```
 
 ---
