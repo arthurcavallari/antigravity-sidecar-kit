@@ -610,8 +610,19 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
     assert.deepEqual(receivedSubpaths, ['settings/general'], 'duplicate consecutive subpath must be ignored');
 
     dispatchHostMsg({ type: 'host-url-change', payload: { subpath: 'spoofed/path' } }, { otherWindow: true });
+    dispatchHostMsg({ type: 'host-url-change', payload: { subpath: 'null-source/path' } }, null);
     dispatchHostMsg({ type: 'host-url-change', payload: { subpath: '../secret' } });
     assert.deepEqual(receivedSubpaths, ['settings/general']);
+
+    // Standalone top-level mode (window.parent === window) must also reject host-url-change
+    const savedParent = domWin.parent;
+    domWin.parent = domWin;
+    try {
+      dispatchHostMsg({ type: 'host-url-change', payload: { subpath: 'standalone/path' } }, domWin);
+      assert.deepEqual(receivedSubpaths, ['settings/general']);
+    } finally {
+      domWin.parent = savedParent;
+    }
 
     bridge.destroy();
     dispatchHostMsg({ type: 'host-url-change', payload: { subpath: 'after/destroy' } });
