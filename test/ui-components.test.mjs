@@ -989,14 +989,57 @@ describe('antigravity-sidecar-kit/ui components and Light-DOM Custom Elements (l
     assert.equal(doc.querySelector('[role="dialog"]'), null);
     assert.deepEqual(revokedUrls, ['blob:modal/1']);
 
-    // application/json shows Copy text; backdrop click dismisses and revokes
+    // application/json shows Copy text; writeText NotAllowedError falls through to execCommand('copy'),
+    // restores copyBtn focus, and false execCommand does NOT falsely display 'Copied'
+    Object.defineProperty(win, 'navigator', {
+      configurable: true,
+      value: {
+        clipboard: {
+          async writeText() {
+            const err = new Error('Write permission denied.');
+            err.name = 'NotAllowedError';
+            throw err;
+          },
+        },
+      },
+    });
+    const execCalls = [];
+    let execReturn = false;
+    doc.execCommand = (cmd) => {
+      const ta = doc.querySelector('textarea');
+      execCalls.push({ cmd, value: ta?.value ?? null });
+      return execReturn;
+    };
+
     const jsonModal = ui.openDownloadModal({
       blob: new Blob(['{"hello":"world"}'], { type: 'application/json' }),
       filename: 'config.json',
     });
     assert.equal(jsonModal.getAttribute('role'), 'dialog');
     assert.equal(jsonModal.getAttribute('aria-modal'), 'true');
-    assert.ok(Array.from(jsonModal.querySelectorAll('button')).some((b) => b.textContent === 'Copy text'));
+    const jsonCopyBtn = Array.from(jsonModal.querySelectorAll('button')).find((b) => b.textContent === 'Copy text');
+    assert.ok(jsonCopyBtn);
+    let copyBtnFocusCount = 0;
+    jsonCopyBtn.focus = () => {
+      copyBtnFocusCount++;
+    };
+
+    // Attempt 1: writeText rejects AND execCommand('copy') returns false -> label stays 'Copy text', focus restored
+    jsonCopyBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(execCalls, [{ cmd: 'copy', value: '{"hello":"world"}' }]);
+    assert.equal(jsonCopyBtn.textContent, 'Copy text', 'failed copy must not falsely show Copied');
+    assert.equal(copyBtnFocusCount, 1, 'copyBtn focus restored after temporary textarea removal');
+    assert.equal(doc.querySelector('textarea'), null, 'temporary textarea removed');
+
+    // Attempt 2: writeText rejects AND execCommand('copy') returns true -> label updates to 'Copied', focus restored
+    execReturn = true;
+    jsonCopyBtn.click();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(execCalls.length, 2);
+    assert.equal(jsonCopyBtn.textContent, 'Copied', 'successful execCommand fallback updates label to Copied');
+    assert.equal(copyBtnFocusCount, 2, 'copyBtn focus restored after successful execCommand fallback');
+
     const backdrop = doc.querySelector('.agy-modal-backdrop');
     assert.ok(backdrop);
     backdrop.click();
