@@ -67,6 +67,14 @@ jobs:
                 ;;
             esac
             npm version "${target}" --no-git-tag-version
+            node -e '
+              const fs = require("node:fs");
+              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              const wrapPath = "packages/create-antigravity-sidecar/package.json";
+              const wrap = JSON.parse(fs.readFileSync(wrapPath, "utf8"));
+              wrap.dependencies["antigravity-sidecar-kit"] = "^" + pkg.version;
+              fs.writeFileSync(wrapPath, JSON.stringify(wrap, null, 2) + "\n");
+            '
           else
             version="$(node -p "require('./package.json').version")"
             if [ "${REF_NAME}" != "v${version}" ]; then
@@ -85,7 +93,7 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json
+          git add package.json package-lock.json packages/create-antigravity-sidecar/package.json
           git commit -m "chore(release): ${version}"
           git tag "v${version}"
           git push origin "refs/tags/v${version}"
