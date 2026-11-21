@@ -36,6 +36,13 @@ describe('antigravity-sidecar-kit/models dynamic model catalog', () => {
     assert.ok(performance.now() - t0 < 200);
   });
 
+  it('maps Go internal ThinkingLevel 7 and Orchestrator (Neon) fallback to XHigh', () => {
+    assert.equal(mapThinkingLevel(7), 'XHigh');
+    assert.equal(mapThinkingLevel(7, 'Gemini 4 Neon', 'gemini-4-neon-xhigh'), 'XHigh');
+    assert.equal(extractThinkingEffort('Orchestrator (Neon)', 'gemini-pro-orchestrator-neon'), 'XHigh');
+    assert.equal(extractThinkingEffort('Orchestrator (Carbon)', 'gemini-pro-orchestrator'), 'High');
+  });
+
   it('auto-detects flagship vs fast families, checkpointer ceilings, and hidden tiered models for arbitrary future codenames', () => {
     const availResponse = {
       response: {

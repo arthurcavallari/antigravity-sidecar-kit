@@ -152,6 +152,39 @@ describe('manifest-validator', () => {
       assert.equal(badCamelUiConfig.valid, false);
       assert.equal(badCamelUiConfig.errors[0].ruleId, 'SIDECAR-DRIFT-04');
     });
+
+    it('accepts 2.34.0 sandbox.allowed_http_hosts and warns on deprecated allowed_hosts', () => {
+      const validBase = { command: 'node', args: ['launch.mjs'] };
+      const validRes = validateSidecarJson({
+        ...validBase,
+        sandbox: { allowed_http_hosts: ['api.example.com'], allowedHttpHosts: ['cdn.example.com'] },
+      });
+      assert.equal(validRes.valid, true);
+      assert.equal(validRes.warnings.length, 0);
+
+      const badType = validateSidecarJson({ ...validBase, sandbox: { allowed_http_hosts: [''] } });
+      assert.equal(badType.valid, false);
+      assert.equal(badType.errors[0].ruleId, 'SIDECAR-DRIFT-04');
+      assert.match(badType.errors[0].message, /allowed_http_hosts/);
+
+      const badCamelType = validateSidecarJson({ ...validBase, sandbox: { allowedHttpHosts: [123] } });
+      assert.equal(badCamelType.valid, false);
+      assert.equal(badCamelType.errors[0].ruleId, 'SIDECAR-DRIFT-04');
+      assert.match(badCamelType.errors[0].message, /allowedHttpHosts/);
+
+      const deprecated = validateSidecarJson({ ...validBase, sandbox: { allowed_hosts: ['example.com'] } });
+      assert.equal(deprecated.valid, true);
+      assert.equal(deprecated.warnings.length, 1);
+      assert.equal(deprecated.warnings[0].ruleId, 'SIDECAR-DRIFT-04');
+      assert.equal(deprecated.warnings[0].severity, 'warn');
+      assert.match(deprecated.warnings[0].message, /deprecated.*allowed_http_hosts/i);
+
+      const deprecatedCamel = validateSidecarJson({ ...validBase, sandbox: { allowedHosts: ['example.com'] } });
+      assert.equal(deprecatedCamel.valid, true);
+      assert.equal(deprecatedCamel.warnings.length, 1);
+      assert.equal(deprecatedCamel.warnings[0].ruleId, 'SIDECAR-DRIFT-04');
+      assert.match(deprecatedCamel.warnings[0].message, /deprecated.*allowed_http_hosts/i);
+    });
   });
 
   describe('validateHubManifest', () => {
@@ -473,14 +506,14 @@ describe('manifest-validator', () => {
       }
     });
 
-    it('validates 2.33.0 SidecarSandboxConfig fields and TypeScript (.ts/.mts) sidecar & hook entrypoints', () => {
+    it('validates SidecarSandboxConfig fields and TypeScript (.ts/.mts) sidecar & hook entrypoints', () => {
       const okSb = validateSidecarJson({
         command: 'node',
         args: ['server.mts'],
         sandbox: {
           disable_sandbox: false,
           allow_full_network: false,
-          allowed_hosts: ['api.example.com'],
+          allowed_http_hosts: ['api.example.com'],
           read_only_paths: ['/opt/shared-data'],
           read_write_paths: ['C:\\Temp\\sidecar-cache'],
         },
@@ -494,7 +527,7 @@ describe('manifest-validator', () => {
         sandbox: {
           disable_sandbox: 'yes',
           allow_full_network: 1,
-          allowed_hosts: [''],
+          allowed_http_hosts: [''],
           read_only_paths: ['~/.gemini/antigravity'],
           read_write_paths: ['/Users/alice/.gemini/config/plugins'],
         },
