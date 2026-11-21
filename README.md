@@ -3,7 +3,7 @@
 <p>
   <a href="https://www.npmjs.com/package/antigravity-sidecar-kit"><img src="https://img.shields.io/npm/v/antigravity-sidecar-kit?logo=npm&color=cb3837" alt="npm version" height="20"></a>
   <a href="https://github.com/arthurcavallari/antigravity-sidecar-kit/actions/workflows/test.yml"><img src="https://github.com/arthurcavallari/antigravity-sidecar-kit/actions/workflows/test.yml/badge.svg" alt="Tests" height="20"></a>
-  <img src="https://img.shields.io/badge/Antigravity-2.0%E2%80%932.33.0-4285F4?logo=google&logoColor=white" alt="Antigravity 2.0–2.33.0" height="20">
+  <img src="https://img.shields.io/badge/Antigravity-2.0%E2%80%932.34.0-4285F4?logo=google&logoColor=white" alt="Antigravity 2.0–2.34.0" height="20">
   <img src="https://img.shields.io/node/v/antigravity-sidecar-kit?logo=nodedotjs&logoColor=white&color=339933" alt="Node.js version" height="20">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" height="20"></a>
   <a href="https://github.com/sponsors/arthurcavallari"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub" height="20"></a>
@@ -159,6 +159,41 @@ setupSidecarServer(app, {
 });
 
 await app.run();
+```
+
+---
+
+### `antigravity-sidecar-kit/shell` (`window.AgyShell`)
+Browser shell runtime served at `/shell.js` (`createShellClientHandler` / `setupSidecarServer`) providing SSE state-sync subscription, visibility-aware polling, Antigravity 2.34.0 `urlSync` subpath & history synchronization, and host UI bridges:
+
+```js
+// Bidirectional ?urlSync=1&initSubpath=... bridge (no-op when urlSync=1 is absent)
+const urlSync = window.AgyShell.createUrlSyncBridge({
+  onSubpathChange(subpath) {
+    renderRoute(subpath); // re-entrant pushSubpath calls inside onSubpathChange are suppressed
+  },
+});
+
+if (urlSync.enabled) {
+  renderRoute(urlSync.getInitialSubpath());
+  urlSync.pushSubpath('extensions/discover', { replace: true });
+  urlSync.stepHistory(-1); // integer delta clamped to [-50, 50]
+}
+
+// Host subpath validator (mirrors Antigravity's subpath rules; returns string | undefined)
+window.AgyShell.sanitizeSyncSubpath('tab/my-plugin%2Fcockpit');
+
+// Open a fresh conversation in the host UI (delegates to window.sidecar.ui.newConversation)
+window.AgyShell.newConversation();
+
+// Open or toggle an Auxiliary Pane view, including 2.34.0 routing options
+window.AgyShell.toggleAuxPane({
+  tabType: 'fileView',
+  uri: 'file:///workspace/src/index.js',
+  targetConversationId: 'conv-123',
+  keepOpen: true,
+  background: true,
+});
 ```
 
 ---

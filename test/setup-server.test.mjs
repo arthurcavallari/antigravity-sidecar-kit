@@ -748,7 +748,7 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
     }
   });
 
-  it('FALLBACK_PRELOAD_JS exposes window.sidecar.auth.requestCredentialRefresh() for 2.33.0 parity', () => {
+  it('FALLBACK_PRELOAD_JS exposes window.sidecar.auth.requestCredentialRefresh() and 2.34.0 window.sidecar.ui.newConversation()', () => {
     const posted = [];
     const parentWin = { postMessage: (msg, origin) => posted.push({ msg, origin }) };
     const win = {
@@ -765,9 +765,32 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       Promise,
     });
     assert.equal(typeof win.sidecar?.auth?.requestCredentialRefresh, 'function');
+    assert.equal(typeof win.sidecar?.ui?.newConversation, 'function');
     win.sidecar.auth.requestCredentialRefresh();
+    win.sidecar.ui.newConversation();
+    win.sidecar.ui.toggleAuxPane({
+      tabType: 'fileView',
+      uri: 'file:///a.js',
+      targetConversationId: 'c1',
+      keepOpen: true,
+      background: true,
+    });
     assert.deepEqual(JSON.parse(JSON.stringify(posted)), [
       { msg: { type: 'request-credential-refresh' }, origin: '*' },
+      { msg: { type: 'new-conversation' }, origin: '*' },
+      {
+        msg: {
+          type: 'toggle-aux-pane',
+          payload: {
+            tabType: 'fileView',
+            uri: 'file:///a.js',
+            targetConversationId: 'c1',
+            keepOpen: true,
+            background: true,
+          },
+        },
+        origin: '*',
+      },
     ]);
   });
 });

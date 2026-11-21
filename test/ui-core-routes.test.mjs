@@ -496,4 +496,175 @@ describe('antigravity-sidecar-kit/ui core routes, modularity, leak guards, and t
       { msg: { type: 'request-credential-refresh' }, targetOrigin: '*' },
     ]);
   });
+
+  it('validates subpaths in sanitizeSyncSubpath, bridges urlSync/history without echo loops, and forwards 2.34.0 newConversation & toggleAuxPane fields', () => {
+    const { window: domWin, document: domDoc } = parseHTML('<!DOCTYPE html><html><body></body></html>');
+    const posted = [];
+    domWin.parent = {
+      postMessage(msg, targetOrigin) {
+        posted.push({ msg, targetOrigin });
+      },
+    };
+    domWin.location = {
+      href: 'http://127.0.0.1:52000/?urlSync=1&initSubpath=extensions%2Fdiscover',
+      search: '?urlSync=1&initSubpath=extensions%2Fdiscover',
+    };
+
+    vm.runInNewContext(AGY_CLIENT_JS, {
+      window: domWin,
+      document: domDoc,
+      URLSearchParams,
+      URL,
+      setTimeout,
+      clearTimeout,
+    });
+
+    const { sanitizeSyncSubpath, createUrlSyncBridge, newConversation, toggleAuxPane } = domWin.AgyShell;
+    assert.equal(typeof sanitizeSyncSubpath, 'function');
+    assert.equal(typeof createUrlSyncBridge, 'function');
+    assert.equal(typeof newConversation, 'function');
+
+    // sanitizeSyncSubpath (WLc parity)
+    assert.equal(sanitizeSyncSubpath('tab/agy-plugin-porter%2Fcockpit'), 'tab/agy-plugin-porter%2Fcockpit');
+    assert.equal(sanitizeSyncSubpath('extensions/discover'), 'extensions/discover');
+    assert.equal(sanitizeSyncSubpath('/terminal/'), 'terminal');
+    assert.equal(sanitizeSyncSubpath(''), '');
+    assert.equal(sanitizeSyncSubpath('/'), '');
+    assert.equal(sanitizeSyncSubpath('extensions/~q=sort=popular&q=lint'), 'extensions/~q=sort=popular&q=lint');
+    assert.equal(sanitizeSyncSubpath('x'.repeat(8192)), 'x'.repeat(8192));
+
+    assert.equal(sanitizeSyncSubpath('../secret'), undefined);
+    assert.equal(sanitizeSyncSubpath('tab/%2e%2e/x'), undefined);
+    assert.equal(sanitizeSyncSubpath('tab/foo%2F..%2Fbar'), undefined);
+    assert.equal(sanitizeSyncSubpath('tab/.'), undefined);
+    assert.equal(sanitizeSyncSubpath('a//b'), undefined);
+    assert.equal(sanitizeSyncSubpath('a?b=1'), undefined);
+    assert.equal(sanitizeSyncSubpath('a#frag'), undefined);
+    assert.equal(sanitizeSyncSubpath('a\\b'), undefined);
+    assert.equal(sanitizeSyncSubpath('a\x00b'), undefined);
+    assert.equal(sanitizeSyncSubpath('a\x7fb'), undefined);
+    assert.equal(sanitizeSyncSubpath('tab/%5Cevil'), undefined);
+    assert.equal(sanitizeSyncSubpath('tab/%E0%A4%A'), undefined);
+    assert.equal(sanitizeSyncSubpath('~q=token=abc'), undefined);
+    assert.equal(sanitizeSyncSubpath('~q=entrypoint=sidebar'), undefined);
+    assert.equal(sanitizeSyncSubpath('~q=conversationId=c1'), undefined);
+    assert.equal(sanitizeSyncSubpath('~q=urlSync=1'), undefined);
+    assert.equal(sanitizeSyncSubpath('~q=initSubpath=foo'), undefined);
+    assert.equal(sanitizeSyncSubpath('~q=tok%2565n=abc'), undefined);
+    assert.equal(sanitizeSyncSubpath('%7Eq=token=abc'), undefined);
+    assert.equal(sanitizeSyncSubpath('x'.repeat(8193)), undefined);
+    assert.equal(sanitizeSyncSubpath(null), undefined);
+
+    // createUrlSyncBridge when ?urlSync=1 is active
+    const receivedSubpaths = [];
+    let echoReturn = null;
+    const bridge = createUrlSyncBridge({
+      onSubpathChange(subpath) {
+        receivedSubpaths.push(subpath);
+        echoReturn = bridge.pushSubpath(subpath);
+      },
+    });
+    assert.equal(bridge.enabled, true);
+    assert.equal(bridge.getInitialSubpath(), 'extensions/discover');
+
+    assert.equal(bridge.pushSubpath('/tab/agy-plugin-porter%2Fcockpit/'), true);
+    assert.equal(bridge.pushSubpath('extensions/installed', { replace: true }), true);
+    assert.equal(bridge.pushSubpath('../secret'), false);
+    assert.equal(bridge.stepHistory(99), true);
+    assert.equal(bridge.stepHistory(-99.8), true);
+    assert.equal(bridge.stepHistory(0), false);
+    assert.equal(bridge.stepHistory(0.4), false);
+    assert.equal(bridge.stepHistory(NaN), false);
+
+    assert.deepEqual(JSON.parse(JSON.stringify(posted)), [
+      {
+        msg: {
+          type: 'sidecar-url-change',
+          payload: { subpath: 'tab/agy-plugin-porter%2Fcockpit', replace: false },
+        },
+        targetOrigin: '*',
+      },
+      {
+        msg: {
+          type: 'sidecar-url-change',
+          payload: { subpath: 'extensions/installed', replace: true },
+        },
+        targetOrigin: '*',
+      },
+      { msg: { type: 'sidecar-history-step', payload: { delta: 50 } }, targetOrigin: '*' },
+      { msg: { type: 'sidecar-history-step', payload: { delta: -50 } }, targetOrigin: '*' },
+    ]);
+
+    posted.length = 0;
+    const dispatchHostMsg = (data, source = domWin.parent) => {
+      domWin.dispatchEvent(Object.assign(new domWin.Event('message'), { data, source }));
+    };
+
+    // Host-driven subpath change invokes callback, suppresses synchronous pushSubpath echo, and deduplicates repeats
+    dispatchHostMsg({ type: 'host-url-change', payload: { subpath: '/settings/general/' } });
+    assert.deepEqual(receivedSubpaths, ['settings/general']);
+    assert.equal(echoReturn, false);
+    assert.deepEqual(posted, [], 'onSubpathChange synchronous pushSubpath must not echo sidecar-url-change');
+
+    dispatchHostMsg({ type: 'host-url-change', payload: { subpath: 'settings/general' } });
+    assert.deepEqual(receivedSubpaths, ['settings/general'], 'duplicate consecutive subpath must be ignored');
+
+    dispatchHostMsg({ type: 'host-url-change', payload: { subpath: 'spoofed/path' } }, { otherWindow: true });
+    dispatchHostMsg({ type: 'host-url-change', payload: { subpath: '../secret' } });
+    assert.deepEqual(receivedSubpaths, ['settings/general']);
+
+    bridge.destroy();
+    dispatchHostMsg({ type: 'host-url-change', payload: { subpath: 'after/destroy' } });
+    assert.deepEqual(receivedSubpaths, ['settings/general']);
+    assert.equal(bridge.pushSubpath('after/destroy'), false);
+    assert.equal(bridge.stepHistory(1), false);
+    assert.deepEqual(posted, []);
+
+    // createUrlSyncBridge when urlSync=1 is absent
+    domWin.location = {
+      href: 'http://127.0.0.1:52000/?token=t1',
+      search: '?token=t1',
+    };
+    const disabledBridge = createUrlSyncBridge();
+    assert.equal(disabledBridge.enabled, false);
+    assert.equal(disabledBridge.getInitialSubpath(), '');
+    assert.equal(disabledBridge.pushSubpath('extensions/discover'), false);
+    assert.equal(disabledBridge.stepHistory(-1), false);
+    assert.deepEqual(posted, []);
+
+    // newConversation & 2.34.0 toggleAuxPane fields
+    assert.equal(newConversation(), true);
+    assert.equal(
+      toggleAuxPane({
+        tabType: 'fileView',
+        uri: 'file:///a.js',
+        targetConversationId: 'c1',
+        keepOpen: true,
+        background: true,
+      }),
+      true
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(posted)), [
+      { msg: { type: 'new-conversation' }, targetOrigin: '*' },
+      {
+        msg: {
+          type: 'toggle-aux-pane',
+          payload: {
+            tabType: 'fileView',
+            uri: 'file:///a.js',
+            targetConversationId: 'c1',
+            keepOpen: true,
+            background: true,
+          },
+        },
+        targetOrigin: '*',
+      },
+    ]);
+
+    let delegatedNewConv = 0;
+    domWin.sidecar = { ui: { newConversation: () => { delegatedNewConv++; } } };
+    assert.equal(newConversation(), true);
+    assert.equal(delegatedNewConv, 1);
+    assert.equal(posted.length, 2);
+  });
 });
