@@ -592,5 +592,69 @@ describe('manifest-validator', () => {
         rmSync(tsDir, { recursive: true, force: true });
       }
     });
+
+    it('lintPluginOrSidecar walks sidecars/*/sidecar.json and sidecars.json entries, and rejects wildcard access_grants', () => {
+      const pluginDir = mkdtempSync(join(tmpdir(), 'kit-lint-plugin-sidecars-'));
+      try {
+        writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'multi-sidecar-plugin', version: '1.0.0' }));
+        mkdirSync(join(pluginDir, 'sidecars', 'board'), { recursive: true });
+        writeFileSync(
+          join(pluginDir, 'sidecars', 'board', 'sidecar.json'),
+          JSON.stringify({
+            command: 'node',
+            args: ['missing-board.mjs'],
+            restart_policy: 'always',
+            agent_permissions: {
+              access_grants: ['command(*)', 'read_file(/)', 'command(gh pr list)'],
+            },
+          })
+        );
+
+        mkdirSync(join(pluginDir, 'packages', 'ext-sidecars', 'cron-job'), { recursive: true });
+        writeFileSync(
+          join(pluginDir, 'packages', 'ext-sidecars', 'cron-job', 'sidecar.json'),
+          JSON.stringify({
+            builtin: 'schedule',
+            args: ['node'],
+            restart_policy: 'always',
+          })
+        );
+        writeFileSync(
+          join(pluginDir, 'sidecars.json'),
+          JSON.stringify({
+            entries: [{ path: 'packages/ext-sidecars' }],
+          })
+        );
+
+        const res = lintPluginOrSidecar(pluginDir);
+        assert.equal(res.valid, false);
+        assert.ok(
+          res.errors.some((e) => e.file === 'sidecars/board/sidecar.json' && e.message.includes('command(*)')),
+          `expected wildcard command(*) error in ${JSON.stringify(res.errors)}`
+        );
+        assert.ok(
+          res.errors.some((e) => e.file === 'sidecars/board/sidecar.json' && e.message.includes('read_file(/)')),
+          `expected wildcard read_file(/) error in ${JSON.stringify(res.errors)}`
+        );
+        assert.ok(
+          res.warnings.some((w) => w.file === 'sidecars/board/sidecar.json' && w.message.includes('missing-board.mjs')),
+          `expected missing-board.mjs warning in ${JSON.stringify(res.warnings)}`
+        );
+        assert.ok(
+          res.errors.some(
+            (e) =>
+              e.file === 'packages/ext-sidecars/cron-job/sidecar.json' &&
+              e.message.includes('"builtin": "schedule"')
+          ),
+          `expected schedule args error from sidecars.json target in ${JSON.stringify(res.errors)}`
+        );
+
+        writeFileSync(join(pluginDir, 'sidecars.json'), '{ malformed', 'utf8');
+        const badCfg = lintPluginOrSidecar(pluginDir);
+        assert.ok(badCfg.errors.some((e) => e.file === 'sidecars.json'));
+      } finally {
+        rmSync(pluginDir, { recursive: true, force: true });
+      }
+    });
   });
 });
