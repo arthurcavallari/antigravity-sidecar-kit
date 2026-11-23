@@ -246,6 +246,63 @@ describe('scaffoldProject archetypes (Task 3)', () => {
         await liveSrv.close();
       }
 
+      // Regression: server.mjs (with ANTIGRAVITY_EXECUTABLE_DATA_DIR=.../sidecar_data/stash/data)
+      // and mcp.mjs (without ANTIGRAVITY_EXECUTABLE_DATA_DIR) resolve the exact same state.json path
+      const fakeHome = join(tmp, 'fake-home');
+      const expectedStateFile = join(
+        fakeHome,
+        '.gemini',
+        'antigravity',
+        'sidecar_data',
+        'stash',
+        'state.json'
+      );
+      const offlineEnvIn = new PassThrough();
+      const offlineEnvOut = new PassThrough();
+      const offlineEnvReader = createLineReader(offlineEnvOut);
+      const offlineEnvBridge = startMcpStdio({
+        env: { HOME: fakeHome, USERPROFILE: fakeHome },
+        input: offlineEnvIn,
+        output: offlineEnvOut,
+      });
+      try {
+        offlineEnvIn.write(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id: 20,
+            method: 'tools/call',
+            params: { name: 'add_item', arguments: { text: 'persisted-offline' } },
+          })}\n`
+        );
+        const offlineEnvReply = await offlineEnvReader.next();
+        assert.equal(offlineEnvReply.id, 20);
+      } finally {
+        offlineEnvReader.close();
+        offlineEnvIn.end();
+        offlineEnvBridge.close();
+        await offlineEnvBridge.closed;
+      }
+      assert.equal(existsSync(expectedStateFile), true);
+
+      const execDataDir = join(fakeHome, '.gemini', 'antigravity', 'sidecar_data', 'stash', 'data');
+      const envSrv = await createServer({
+        port: 0,
+        uiToken: 'env-tok',
+        env: {
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          ANTIGRAVITY_EXECUTABLE_DATA_DIR: execDataDir,
+        },
+      });
+      try {
+        assert.equal(envSrv.stateSync.globalState.statePath, expectedStateFile);
+        assert.equal(envSrv.stateSync.getState().items.length, 1);
+        assert.equal(envSrv.stateSync.getState().items[0].text, 'persisted-offline');
+        assert.equal(existsSync(join(execDataDir, 'state.json')), false);
+      } finally {
+        await envSrv.close();
+      }
+
       // Verify generated setup.mjs --with-mcp (default), --no-mcp, and --uninstall
       const { runSetup } = await import(pathToFileURL(join(outDir, 'setup.mjs')).href);
       const sandboxDir = join(tmp, 'sandbox');
@@ -382,6 +439,44 @@ describe('scaffoldProject archetypes (Task 3)', () => {
       const mcpReader = createLineReader(mcpOut);
       const mcpSrv = startPluginMcpStdio({ input: mcpIn, output: mcpOut });
       try {
+        mcpIn.write(`${JSON.stringify({ jsonrpc: '2.0', id: 100, method: 'server/discover', params: {} })}\n`);
+        const discoverRes = await mcpReader.next();
+        assert.equal(discoverRes.result.protocolVersion, '2026-07-28');
+        assert.equal(Array.isArray(discoverRes.result.supportedVersions), true);
+
+        mcpIn.write(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id: 101,
+            method: 'initialize',
+            params: { protocolVersion: '' },
+          })}\n`
+        );
+        const emptyInitRes = await mcpReader.next();
+        assert.equal(emptyInitRes.result.protocolVersion, '2025-06-18');
+
+        mcpIn.write(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id: 102,
+            method: 'initialize',
+            params: { protocolVersion: '1999-01-01' },
+          })}\n`
+        );
+        const unsupportedInitRes = await mcpReader.next();
+        assert.equal(unsupportedInitRes.result.protocolVersion, '2025-06-18');
+
+        mcpIn.write(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id: 103,
+            method: 'initialize',
+            params: { protocolVersion: '2026-07-28' },
+          })}\n`
+        );
+        const negotiatedInitRes = await mcpReader.next();
+        assert.equal(negotiatedInitRes.result.protocolVersion, '2026-07-28');
+
         mcpIn.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })}\n`);
         const toolsRes = await mcpReader.next();
         assert.deepEqual(toolsRes.result.tools.map((t) => t.name), ['ping']);
@@ -489,8 +584,24 @@ describe('scaffoldProject archetypes (Task 3)', () => {
       const { createServer } = await import(
         pathToFileURL(join(outDir, 'plugin', 'sidecars', 'cockpit', 'server.mjs')).href
       );
-      const srv = await createServer({ port: 0, uiToken: 'plug-tok' });
+      const srv = await createServer({
+        port: 0,
+        uiToken: 'plug-tok',
+        env: { HOME: join(tmp, 'plug-home'), USERPROFILE: join(tmp, 'plug-home') },
+      });
       try {
+        assert.equal(
+          srv.stateSync.globalState.statePath,
+          join(
+            tmp,
+            'plug-home',
+            '.gemini',
+            'antigravity',
+            'sidecar_data',
+            'agy-cockpit--cockpit',
+            'state.json'
+          )
+        );
         const healthRes = await fetch(`http://127.0.0.1:${srv.port}/_sidecar/health`);
         assert.equal(healthRes.status, 200);
         const statusRes = await fetch(`http://127.0.0.1:${srv.port}/api/status`, {
