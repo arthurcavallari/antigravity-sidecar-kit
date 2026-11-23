@@ -1,0 +1,47 @@
+{
+  "name": "create-agy",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "npm create agy: scaffold a Google Antigravity sidecar or native plugin across all 4 archetypes (thin wrapper around antigravity-sidecar-kit).",
+  "license": "MIT",
+  "author": {
+    "name": "Arthur Cavallari",
+    "url": "https://github.com/arthurcavallari"
+  },
+  "homepage": "https://github.com/arthurcavallari/antigravity-sidecar-kit#readme",
+  "bugs": {
+    "url": "https://github.com/arthurcavallari/antigravity-sidecar-kit/issues"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/arthurcavallari"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arthurcavallari/antigravity-sidecar-kit.git",
+    "directory": "packages/create-agy"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "create-agy": "bin/cli.mjs"
+  },
+  "dependencies": {
+    "antigravity-sidecar-kit": "^1.9.0"
+  },
+  "keywords": [
+    "create",
+    "agy",
+    "antigravity",
+    "google-antigravity",
+    "antigravity-plugin",
+    "antigravity-sidecar",
+    "scaffold"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
