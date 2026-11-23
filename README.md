@@ -35,7 +35,7 @@ cd agy-my-plugin && npm install && npm run build:plugin
 agy plugin install ./dist/plugin/agy-my-plugin
 ```
 
-`npm create agy` runs [`create-agy`](https://www.npmjs.com/package/create-agy); `npm create antigravity-sidecar` runs [`create-antigravity-sidecar`](https://www.npmjs.com/package/create-antigravity-sidecar). Both delegate to `antigravity-sidecar-kit/cli` (`npx antigravity-sidecar-kit` / `npx agy-kit`).
+`npm create agy` runs [`create-agy`](https://www.npmjs.com/package/create-agy); `npm create antigravity-sidecar` runs [`create-antigravity-sidecar`](https://www.npmjs.com/package/create-antigravity-sidecar). Both delegate to `antigravity-sidecar-kit/cli` (`npx antigravity-sidecar-kit`).
 
 ### Archetypes
 
@@ -46,13 +46,15 @@ agy plugin install ./dist/plugin/agy-my-plugin
 | `plugin` | `agy-<id>` | `plugin/plugin.json` + selected `--components` (`skills`, `mcp`, `rules`, `hooks`, `agents`) + release CI | `npm run build:plugin` + `agy plugin install` |
 | `plugin-sidecar` | `agy-<id>` | `plugin/plugin.json` + companion `plugin/sidecars/<id>/` + optional plugin components + bundled kit | `npm run build:plugin` + `agy plugin install` |
 
-### CLI Subcommands (`agy-sidecar-kit` / `agy-kit`)
+### CLI Subcommands
 
-- `init <name> [--archetype <sidecar-ui|sidecar-mcp|plugin|plugin-sidecar>] [--components <skills,mcp,rules,hooks,agents>] [--entrypoint <aux_pane|sidebar|full_pane>] [--hide-title-bar] [--dir <target-dir>] [--pkg-name <name>] [--title <title>] [--description <text>] [--author <name>] [--github <owner>] [--no-ci] [--yes|-y] [--force|-f]` — Scaffold a new project interactively or headlessly.
+Standalone `npx` invocations outside an installed project must use `npx antigravity-sidecar-kit <subcommand>` (or `npx create-agy` for scaffolding); `agy-sidecar-kit` and `agy-kit` are local `node_modules/.bin` shims available inside installed projects and `npm run` scripts.
+
+- `init <name> [--archetype <sidecar-ui|sidecar-mcp|plugin|plugin-sidecar>] [--components <skills,mcp,rules,hooks,agents>] [--entrypoint <aux_pane|sidebar|full_pane>] [--hide-title-bar] [-d|--dir <target-dir>] [--pkg-name <name>] [--title <title>] [--description <text>] [--author <name>] [--github <owner>] [--no-ci] [--yes|-y] [--force|-f]` — Scaffold a new project interactively or headlessly.
 - `lint [--fix] [--json] [--strict] [--dir <dir>] [dir]` — Validate `sidecar.json`, `plugin.json`, `mcp_config.json`, `hooks.json`, skills, and rules (with auto-fixes for known migration defects).
 - `build-plugin [--dir <dir>] [--out <out-dir>] [--no-tar] [--no-agy-validate] [--json] [dir]` — Assemble `dist/plugin/<pluginName>`, bundle `antigravity-sidecar-kit` when needed, run strict lint + `agy plugin validate --strict` (`agy >= 1.5.13`), and emit `<pluginName>-plugin-<version>.tgz` + `.sha256`.
 - `pack-smoke [--dir <dir>] [--json] [dir]` — Offline tarball smoke test verifying `npm pack` + isolated `setup.mjs` lifecycle for sidecars and `.tgz` extraction + strict lint for plugins without touching `~/.gemini/config`.
-- `registry-entry [--dir <dir>] [--write <registry.json>] [--pr] [--hangar-repo <owner/repo>] [--no-agy-validate] [--json] [dir]` — Infer Hangar capability tier (`TIER_1_TELEMETRY`..`TIER_3_AGENT_CONTROL`), generate/upsert a validated Hangar `registry.json` entry, or open an automated PR via `gh`.
+- `registry-entry [--dir <dir>] [--sha256 <hex>] [--write <registry.json>] [--pr] [--hangar-repo <owner/repo>] [--no-agy-validate] [--json] [dir]` — Infer Hangar capability tier (`TIER_1_TELEMETRY`..`TIER_3_AGENT_CONTROL`), generate/upsert a validated Hangar `registry.json` entry (using `--sha256 <hex>`, an existing `<outDir>/*.tgz.sha256`, or building `.tgz` if missing), or open an automated PR via `gh`.
 
 ---
 

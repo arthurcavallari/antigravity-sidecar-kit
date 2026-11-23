@@ -636,6 +636,53 @@ describe('Task 5: agy-bin, build-plugin, and pack-smoke', () => {
         /repository root|overlap/i
       );
       assert.equal(existsSync(pkgPath), true, 'repoDir must not be deleted when builtDir === repoDir');
+
+      // Regression (I5): in-repo junction/symlink pointing inside plugin/ when builtDir does not yet exist
+      const insidePluginSub = join(repoDir, 'plugin', 'skills');
+      const junctionOut = join(repoDir, 'out-link');
+      symlinkSync(
+        insidePluginSub,
+        junctionOut,
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+      const wouldCreateInPlugin = join(insidePluginSub, 'agy-overlap');
+      assert.equal(existsSync(wouldCreateInPlugin), false, 'precondition: builtDir does not yet exist');
+
+      writeJsonNoBom(pkgPath, {
+        ...basePkg,
+        agyPlugin: { ...basePkg.agyPlugin, outDir: 'out-link' },
+      });
+      assert.throws(
+        () => buildPluginProject({ repoRoot: repoDir, tar: false, agyValidate: false }),
+        /overlap/i
+      );
+      assert.equal(
+        existsSync(wouldCreateInPlugin),
+        false,
+        'buildPluginProject must reject before creating directories inside plugin/'
+      );
+      removeLinkOrDir(junctionOut);
+
+      // Also verify copySafeWithinRepo skips an in-repo symlink/junction inside copy[] that resolves to realOutRoot
+      writeJsonNoBom(pkgPath, {
+        ...basePkg,
+        agyPlugin: { ...basePkg.agyPlugin, copy: ['lib', 'LICENSE'] },
+      });
+      mkdirSync(join(repoDir, 'dist', 'plugin'), { recursive: true });
+      mkdirSync(join(repoDir, 'lib'), { recursive: true });
+      writeFileSync(join(repoDir, 'lib', 'helper.mjs'), 'export const ok = 1;\n', 'utf8');
+      symlinkSync(
+        join(repoDir, 'dist', 'plugin'),
+        join(repoDir, 'lib', 'loop-to-out'),
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+      const cleanBuilt = buildPluginProject({
+        repoRoot: repoDir,
+        tar: false,
+        agyValidate: false,
+      });
+      assert.equal(existsSync(join(cleanBuilt.dir, 'lib', 'helper.mjs')), true);
+      assert.equal(existsSync(join(cleanBuilt.dir, 'lib', 'loop-to-out')), false);
     } finally {
       removeLinkOrDir(tmp);
     }

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -341,6 +342,75 @@ describe('scaffoldProject archetypes (Task 3)', () => {
       });
       const mcpCfgAfter = JSON.parse(readFileSync(mcpConfigPath, 'utf8'));
       assert.equal('stash' in (mcpCfgAfter.mcpServers || {}), false);
+
+      // Regression (I4): setupOpts.callLsRpcFn receives 'RefreshMcpServers' on install & uninstall,
+      // and no live RPC fires against ambient LS when sandboxed without setupOpts.callLsRpcFn
+      const refreshCalls = [];
+      await runSetup(['--skip-tests'], {
+        configJsonPath,
+        mcpConfigPath,
+        globalSidecarsDir,
+        packagesDir,
+        callLsRpcFn: async (method, body, opts) => {
+          refreshCalls.push({ phase: 'install', method, body, opts });
+          return { ok: true };
+        },
+        restartDelayMs: 0,
+      });
+      assert.equal(refreshCalls.length, 1);
+      assert.equal(refreshCalls[0].method, 'RefreshMcpServers');
+      assert.equal(refreshCalls[0].opts.sidecarId, 'stash');
+
+      await runSetup(['--uninstall'], {
+        configJsonPath,
+        mcpConfigPath,
+        globalSidecarsDir,
+        packagesDir,
+        callLsRpcFn: async (method, body, opts) => {
+          refreshCalls.push({ phase: 'uninstall', method, body, opts });
+          return { ok: true };
+        },
+      });
+      assert.equal(refreshCalls.length, 2);
+      assert.equal(refreshCalls[1].method, 'RefreshMcpServers');
+
+      const ambientRequests = [];
+      const dummyLs = createHttpServer((req, res) => {
+        ambientRequests.push(req.url);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+      });
+      await new Promise((resolve) => dummyLs.listen(0, '127.0.0.1', resolve));
+      const prevLs = process.env.ANTIGRAVITY_LS_ADDRESS;
+      const prevCsrf = process.env.ANTIGRAVITY_CSRF_TOKEN;
+      try {
+        process.env.ANTIGRAVITY_LS_ADDRESS = `127.0.0.1:${dummyLs.address().port}`;
+        process.env.ANTIGRAVITY_CSRF_TOKEN = 'ambient-mcp-csrf';
+        await runSetup(['--skip-tests'], {
+          configJsonPath,
+          mcpConfigPath,
+          globalSidecarsDir,
+          packagesDir,
+          restartDelayMs: 0,
+        });
+        await runSetup(['--uninstall'], {
+          configJsonPath,
+          mcpConfigPath,
+          globalSidecarsDir,
+          packagesDir,
+        });
+        assert.deepEqual(
+          ambientRequests,
+          [],
+          'sandboxed sidecar-mcp setup without callLsRpcFn must not fire live RPCs'
+        );
+      } finally {
+        if (prevLs === undefined) delete process.env.ANTIGRAVITY_LS_ADDRESS;
+        else process.env.ANTIGRAVITY_LS_ADDRESS = prevLs;
+        if (prevCsrf === undefined) delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+        else process.env.ANTIGRAVITY_CSRF_TOKEN = prevCsrf;
+        await new Promise((resolve) => dummyLs.close(resolve));
+      }
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

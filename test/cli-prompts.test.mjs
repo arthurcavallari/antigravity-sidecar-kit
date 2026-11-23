@@ -293,6 +293,83 @@ describe('lib/cli/prompts.mjs', () => {
         assert.equal(input.listenerCount('data'), 0);
       });
     }
+
+    it('regression (I8): restores SHOW_CURSOR and propagates PromptCancelledError when setRawMode(false) throws EBADF on Ctrl+C', async () => {
+      const makeEbadfTty = () => {
+        const tty = createMockTty();
+        tty.input.setRawMode = (flag) => {
+          tty.rawModeCalls.push(flag);
+          if (flag === false) {
+            throw Object.assign(new Error('EBADF: bad file descriptor, uv_tty_set_mode'), {
+              code: 'EBADF',
+            });
+          }
+          tty.input.isRaw = true;
+        };
+        return tty;
+      };
+
+      // 1. selectOne
+      const ttyOne = makeEbadfTty();
+      const pOne = selectOne({
+        message: 'Select archetype:',
+        options: ARCHETYPE_OPTIONS,
+        input: ttyOne.input,
+        output: ttyOne.output,
+      });
+      ttyOne.input.write('\x03');
+      await assert.rejects(
+        () => pOne,
+        (err) => {
+          assert.equal(err instanceof PromptCancelledError, true);
+          assert.equal(err.code, 'PROMPT_CANCELLED');
+          assert.equal(err.exitCode, 130);
+          return true;
+        }
+      );
+      assert.equal(ttyOne.getOutput().includes('\x1b[?25h'), true, 'selectOne must emit SHOW_CURSOR');
+      assert.deepEqual(ttyOne.rawModeCalls, [true, false]);
+
+      // 2. selectMany
+      const ttyMany = makeEbadfTty();
+      const pMany = selectMany({
+        message: 'Plugin components:',
+        options: COMPONENT_OPTIONS,
+        input: ttyMany.input,
+        output: ttyMany.output,
+      });
+      ttyMany.input.write('\x03');
+      await assert.rejects(
+        () => pMany,
+        (err) => {
+          assert.equal(err instanceof PromptCancelledError, true);
+          assert.equal(err.code, 'PROMPT_CANCELLED');
+          assert.equal(err.exitCode, 130);
+          return true;
+        }
+      );
+      assert.equal(ttyMany.getOutput().includes('\x1b[?25h'), true, 'selectMany must emit SHOW_CURSOR');
+      assert.deepEqual(ttyMany.rawModeCalls, [true, false]);
+
+      // 3. promptText
+      const ttyText = makeEbadfTty();
+      const pText = promptText({
+        message: 'Project name:',
+        input: ttyText.input,
+        output: ttyText.output,
+      });
+      ttyText.input.write('\x03');
+      await assert.rejects(
+        () => pText,
+        (err) => {
+          assert.equal(err instanceof PromptCancelledError, true);
+          assert.equal(err.code, 'PROMPT_CANCELLED');
+          assert.equal(err.exitCode, 130);
+          return true;
+        }
+      );
+      assert.deepEqual(ttyText.rawModeCalls, [true, false]);
+    });
   });
 
   describe('resolveInitOptions', () => {

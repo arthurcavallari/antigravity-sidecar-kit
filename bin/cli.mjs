@@ -3,9 +3,9 @@
  * @fileoverview CLI entrypoint for antigravity-sidecar-kit / create-agy / create-antigravity-sidecar / agy-sidecar-kit / agy-kit.
  */
 
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
-import { writeJsonNoBom } from '../lib/config.mjs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { readJsonSafe, writeJsonNoBom } from '../lib/config.mjs';
 import { buildPluginProject } from '../lib/cli/build-plugin.mjs';
 import { runPackSmoke } from '../lib/cli/pack-smoke.mjs';
 import { PromptCancelledError, resolveInitOptions } from '../lib/cli/prompts.mjs';
@@ -24,11 +24,11 @@ const KIT_VERSION = JSON.parse(
 const USAGE = [
   'Usage:',
   '  npm create agy [<name>] [--archetype <sidecar-ui|sidecar-mcp|plugin|plugin-sidecar>] [options]',
-  '  npx antigravity-sidecar-kit init <sidecar-name> [--archetype <sidecar-ui|sidecar-mcp|plugin|plugin-sidecar>] [--dir <target-dir>] [--pkg-name <name>] [--title <title>] [--description <text>] [--entrypoint <aux_pane|sidebar|full_pane>] [--hide-title-bar] [--components <skills,mcp,rules,hooks,agents>] [--author <name>] [--github <owner>] [--no-ci] [--yes|-y] [--force|-f]',
+  '  npx antigravity-sidecar-kit init <sidecar-name> [--archetype <sidecar-ui|sidecar-mcp|plugin|plugin-sidecar>] [-d, --dir <path>] [--pkg-name <name>] [--title <title>] [--description <text>] [--entrypoint <aux_pane|sidebar|full_pane>] [--hide-title-bar] [--components <skills,mcp,rules,hooks,agents>] [--author <name>] [--github <owner>] [--no-ci] [--yes|-y] [--force|-f]',
   '  npx antigravity-sidecar-kit lint [--fix] [--json] [--strict] [--dir <dir>] [dir]',
   '  npx antigravity-sidecar-kit build-plugin [--dir <dir>] [--out <out-dir>] [--no-tar] [--no-agy-validate] [--json] [dir]',
   '  npx antigravity-sidecar-kit pack-smoke [--dir <dir>] [--json] [dir]',
-  '  npx antigravity-sidecar-kit registry-entry [--dir <dir>] [--write <registry.json>] [--pr] [--hangar-repo <owner/repo>] [--no-agy-validate] [--json] [dir]',
+  '  npx antigravity-sidecar-kit registry-entry [--dir <dir>] [--sha256 <64-hex>] [--write <registry.json>] [--pr] [--hangar-repo <owner/repo>] [--no-agy-validate] [--json] [dir]',
   '',
   'Archetypes:',
   '  sidecar-ui       Standalone Auxiliary Pane webview sidecar (default)',
@@ -98,29 +98,149 @@ function runLint(args) {
   const targetDir = resolve(dir || process.cwd());
   let res = lintPluginOrSidecar(targetDir, { fix, strict });
 
-  const nestedPluginDir = join(targetDir, 'plugin');
+  const addLintError = (ruleId, file, message) => {
+    const errors = [...res.errors, { severity: 'error', ruleId, file, message }];
+    res = {
+      valid: false,
+      errors,
+      warnings: res.warnings,
+      fixedCount: res.fixedCount,
+    };
+  };
+
   if (
     !existsSync(join(targetDir, 'plugin.json')) &&
-    !existsSync(join(targetDir, 'sidecar.json')) &&
-    existsSync(join(nestedPluginDir, 'plugin.json'))
+    !existsSync(join(targetDir, 'sidecar.json'))
   ) {
-    let isSymlink = false;
-    try {
-      isSymlink = lstatSync(nestedPluginDir).isSymbolicLink();
-    } catch {
-      isSymlink = true;
+    const pkgPath = join(targetDir, 'package.json');
+    let pkg = null;
+    let pkgReadFailed = false;
+    if (existsSync(pkgPath)) {
+      try {
+        pkg = readJsonSafe(pkgPath, null, { strict: true });
+      } catch (err) {
+        pkgReadFailed = true;
+        addLintError(
+          'JSON-PARSE-01',
+          'package.json',
+          `Invalid JSON in package.json: ${err?.message || String(err)}`
+        );
+      }
     }
-    if (!isSymlink) {
-      const sub = lintPluginOrSidecar(nestedPluginDir, { fix, strict });
-      const prefixItem = (item) => ({
-        ...item,
-        file: item.file ? `plugin/${item.file}` : 'plugin',
-      });
-      const errors = [...res.errors, ...sub.errors.map(prefixItem)];
-      const warnings = [...res.warnings, ...sub.warnings.map(prefixItem)];
-      const fixedCount = res.fixedCount + sub.fixedCount;
-      const valid = strict ? errors.length === 0 && warnings.length === 0 : errors.length === 0;
-      res = { valid, errors, warnings, fixedCount };
+
+    if (!pkgReadFailed) {
+      const hasAgyPlugin = pkg !== null && pkg.agyPlugin !== undefined;
+      if (
+        hasAgyPlugin &&
+        (!pkg.agyPlugin || typeof pkg.agyPlugin !== 'object' || Array.isArray(pkg.agyPlugin))
+      ) {
+        addLintError(
+          'AGY-PLUGIN-DIR-01',
+          'package.json',
+          'package.json "agyPlugin" must be a JSON object.'
+        );
+      } else {
+        const defaultPluginExists = (() => {
+          try {
+            const p = join(targetDir, 'plugin');
+            const st = lstatSync(p);
+            return st.isSymbolicLink() || existsSync(join(p, 'plugin.json'));
+          } catch {
+            return false;
+          }
+        })();
+
+        if (hasAgyPlugin || defaultPluginExists) {
+          const rawPluginDir =
+            hasAgyPlugin && pkg.agyPlugin.pluginDir !== undefined
+              ? pkg.agyPlugin.pluginDir
+              : 'plugin';
+
+          if (
+            typeof rawPluginDir !== 'string' ||
+            !rawPluginDir.trim() ||
+            rawPluginDir.includes('\0') ||
+            isAbsolute(rawPluginDir) ||
+            /^[a-z]:/i.test(rawPluginDir)
+          ) {
+            addLintError(
+              'AGY-PLUGIN-DIR-01',
+              'package.json',
+              `Invalid agyPlugin.pluginDir ${JSON.stringify(rawPluginDir)}: expected a non-empty relative path inside ${targetDir}.`
+            );
+          } else {
+            const resolvedPluginDir = resolve(targetDir, rawPluginDir);
+            const relPluginDir = relative(targetDir, resolvedPluginDir);
+            if (
+              !relPluginDir ||
+              relPluginDir === '.' ||
+              relPluginDir.startsWith('..') ||
+              isAbsolute(relPluginDir)
+            ) {
+              addLintError(
+                'AGY-PLUGIN-DIR-01',
+                'package.json',
+                `agyPlugin.pluginDir "${rawPluginDir}" escapes repository root (${targetDir}).`
+              );
+            } else {
+              let symlinkSegment = '';
+              let cur = targetDir;
+              for (const part of relPluginDir.split(sep).filter(Boolean)) {
+                cur = join(cur, part);
+                try {
+                  if (lstatSync(cur).isSymbolicLink()) {
+                    symlinkSegment = cur;
+                    break;
+                  }
+                } catch {
+                  break;
+                }
+              }
+
+              const realTargetDir = existsSync(targetDir) ? realpathSync.native(targetDir) : targetDir;
+              const realPluginDir = existsSync(resolvedPluginDir)
+                ? realpathSync.native(resolvedPluginDir)
+                : '';
+              const realRel = realPluginDir ? relative(realTargetDir, realPluginDir) : '';
+              const escapesViaRealpath = Boolean(
+                realPluginDir &&
+                  (!realRel || realRel === '.' || realRel.startsWith('..') || isAbsolute(realRel))
+              );
+
+              if (symlinkSegment || escapesViaRealpath) {
+                addLintError(
+                  'AGY-PLUGIN-DIR-01',
+                  'package.json',
+                  `Plugin directory "${rawPluginDir}" must not be or traverse a symbolic link.`
+                );
+              } else if (
+                !existsSync(resolvedPluginDir) ||
+                !existsSync(join(resolvedPluginDir, 'plugin.json'))
+              ) {
+                addLintError(
+                  'AGY-PLUGIN-DIR-01',
+                  'package.json',
+                  `Configured plugin directory "${rawPluginDir}" is missing plugin.json (${join(resolvedPluginDir, 'plugin.json')}).`
+                );
+              } else {
+                const relPosix = relPluginDir.replace(/\\/g, '/');
+                const sub = lintPluginOrSidecar(resolvedPluginDir, { fix, strict });
+                const prefixItem = (item) => ({
+                  ...item,
+                  file: item.file ? `${relPosix}/${item.file}` : relPosix,
+                });
+                const errors = [...res.errors, ...sub.errors.map(prefixItem)];
+                const warnings = [...res.warnings, ...sub.warnings.map(prefixItem)];
+                const fixedCount = res.fixedCount + sub.fixedCount;
+                const valid = strict
+                  ? errors.length === 0 && warnings.length === 0
+                  : errors.length === 0;
+                res = { valid, errors, warnings, fixedCount };
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -275,6 +395,7 @@ function runRegistryEntry(args) {
   let writePath = '';
   let pr = false;
   let hangarRepo = '';
+  let sha256;
   let agyValidate = true;
   let json = false;
 
@@ -296,6 +417,12 @@ function runRegistryEntry(args) {
     if (dirFlag.matched) {
       dir = dirFlag.value;
       i = dirFlag.nextIndex;
+      continue;
+    }
+    const shaFlag = readFlagValue(args, i, '--sha256');
+    if (shaFlag.matched) {
+      sha256 = shaFlag.value;
+      i = shaFlag.nextIndex;
       continue;
     }
     const writeFlag = readFlagValue(args, i, '--write');
@@ -324,7 +451,11 @@ function runRegistryEntry(args) {
 
   if (pr) {
     if (writePath) {
-      const entry = buildRegistryEntry({ repoRoot, agyValidate });
+      const entry = buildRegistryEntry({
+        repoRoot,
+        agyValidate,
+        ...(sha256 !== undefined ? { sha256 } : {}),
+      });
       const resolvedWrite = resolve(writePath);
       if (!existsSync(resolvedWrite)) {
         writeJsonNoBom(resolvedWrite, createEmptyHangarRegistry());
@@ -334,6 +465,7 @@ function runRegistryEntry(args) {
     const prRes = openRegistryPr({
       repoRoot,
       ...(hangarRepo ? { hangarRepo } : {}),
+      ...(sha256 !== undefined ? { sha256 } : {}),
       agyValidate,
     });
     if (json) {
@@ -346,7 +478,11 @@ function runRegistryEntry(args) {
     return;
   }
 
-  const entry = buildRegistryEntry({ repoRoot, agyValidate });
+  const entry = buildRegistryEntry({
+    repoRoot,
+    agyValidate,
+    ...(sha256 !== undefined ? { sha256 } : {}),
+  });
   if (writePath) {
     const resolvedWrite = resolve(writePath);
     if (!existsSync(resolvedWrite)) {
@@ -424,6 +560,12 @@ async function runInit(args, startIndex) {
       i = dirFlag.nextIndex;
       continue;
     }
+    const shortDirFlag = readFlagValue(args, i, '-d');
+    if (shortDirFlag.matched) {
+      parsedFlags.targetDir = shortDirFlag.value;
+      i = shortDirFlag.nextIndex;
+      continue;
+    }
 
     const pkgNameFlag = readFlagValue(args, i, '--pkg-name');
     if (pkgNameFlag.matched) {
@@ -492,7 +634,18 @@ async function runInit(args, startIndex) {
     }
   }
 
-  const resolved = await resolveInitOptions(parsedFlags);
+  let resolved;
+  try {
+    resolved = await resolveInitOptions(parsedFlags);
+  } catch (err) {
+    if (
+      (!parsedFlags.name || !String(parsedFlags.name).trim()) &&
+      /project name is required/i.test(err?.message || '')
+    ) {
+      err.showUsage = true;
+    }
+    throw err;
+  }
   const res = scaffoldProject(resolved);
   const rel = relative(process.cwd(), res.outDir);
   const cdPath = !rel ? '.' : rel.startsWith('..') || isAbsolute(rel) ? res.outDir : rel;
@@ -554,5 +707,8 @@ main().catch((err) => {
     return;
   }
   console.error(`[antigravity-sidecar-kit] Error: ${err?.message || String(err)}`);
+  if (err?.showUsage) {
+    console.error(USAGE);
+  }
   process.exitCode = 1;
 });

@@ -13,6 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonSafe, writeJsonNoBom } from '../lib/config.mjs';
@@ -405,6 +406,82 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       assert.ok(execCalls.length > 0, 'expected port probe against explicit sidecarDataRoot');
       assert.deepEqual(killCalls, [{ pid: 99999, sig: 'SIGTERM' }]);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('regression (I3): sandboxed runSidecarSetup makes 0 HTTP requests to ambient process.env.ANTIGRAVITY_LS_ADDRESS / ANTIGRAVITY_CSRF_TOKEN when rpcOptions is omitted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-sandbox-ambient-ls-'));
+    const prevLsAddr = process.env.ANTIGRAVITY_LS_ADDRESS;
+    const prevCsrf = process.env.ANTIGRAVITY_CSRF_TOKEN;
+    const requests = [];
+    const dummyLs = createHttpServer((req, res) => {
+      requests.push({ method: req.method, url: req.url });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise((resolve) => dummyLs.listen(0, '127.0.0.1', resolve));
+
+    try {
+      const { port } = dummyLs.address();
+      process.env.ANTIGRAVITY_LS_ADDRESS = `127.0.0.1:${port}`;
+      process.env.ANTIGRAVITY_CSRF_TOKEN = 'ambient-live-csrf-token';
+
+      const repoDir = join(dir, 'repo');
+      mkdirSync(repoDir, { recursive: true });
+      writeFileSync(join(repoDir, 'sidecar.json'), '{}', 'utf8');
+      writeFileSync(join(repoDir, 'server.mjs'), '', 'utf8');
+
+      const globalSidecarsDir = join(dir, 'sidecars');
+      const configJsonPath = join(dir, 'config.json');
+      const packagesDir = join(dir, 'packages');
+
+      const installRes = await runSidecarSetup({
+        sidecarId: 'ambient-ls-guard',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+      });
+      assert.equal(installRes.uninstalled, false);
+      assert.equal(installRes.rpcRes.notified, false);
+      assert.equal(requests.length, 0, 'sandboxed install must make 0 HTTP requests to ambient LS');
+
+      const uninstallRes = await runSidecarSetup({
+        sidecarId: 'ambient-ls-guard',
+        repoRoot: repoDir,
+        args: ['--uninstall'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+      });
+      assert.equal(uninstallRes.uninstalled, true);
+      assert.equal(requests.length, 0, 'sandboxed uninstall must make 0 HTTP requests to ambient LS');
+
+      // Explicit rpcOptions.lsAddress + csrfToken still notifies the target server
+      const explicitRes = await runSidecarSetup({
+        sidecarId: 'ambient-ls-guard',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        rpcOptions: {
+          lsAddress: `127.0.0.1:${port}`,
+          csrfToken: 'ambient-live-csrf-token',
+        },
+        restartDelayMs: 0,
+      });
+      assert.equal(explicitRes.rpcRes.notified, true);
+      assert.ok(requests.length >= 1, 'explicit rpcOptions must contact configured LS');
+    } finally {
+      if (prevLsAddr === undefined) delete process.env.ANTIGRAVITY_LS_ADDRESS;
+      else process.env.ANTIGRAVITY_LS_ADDRESS = prevLsAddr;
+      if (prevCsrf === undefined) delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+      else process.env.ANTIGRAVITY_CSRF_TOKEN = prevCsrf;
+      await new Promise((resolve) => dummyLs.close(resolve));
       rmSync(dir, { recursive: true, force: true });
     }
   });

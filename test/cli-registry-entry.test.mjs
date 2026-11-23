@@ -1106,4 +1106,202 @@ describe('Task 6: registry-entry & Hangar tier inference', () => {
       removeLinkOrDir(tmp);
     }
   });
+
+  it('regression (C1): supports --sha256 override without clobbering outDir, fails upfront on malformed sha256 before gh, reuses existing .tgz.sha256/.tgz, and guards srcPluginDir containment', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'agy-reg-c1-'));
+    try {
+      const pluginDir = join(tmp, 'agy-prism');
+      scaffolder.scaffoldProject({
+        name: 'prism',
+        archetype: 'plugin',
+        targetDir: pluginDir,
+        components: ['skills', 'mcp'],
+        author: 'Prism Dev',
+        github: 'octocat',
+      });
+
+      const distPluginDir = join(pluginDir, 'dist', 'plugin');
+      const tarPath = join(distPluginDir, 'agy-prism-plugin-1.0.0.tgz');
+      const shaPath = `${tarPath}.sha256`;
+
+      // (a) Explicit sha256 override does NOT create or clobber dist/plugin
+      const overrideUpper = `  ${'AbCdEf01'.repeat(8)}  `;
+      const entryOverride = buildRegistryEntry({
+        repoRoot: pluginDir,
+        kitRoot: KIT_ROOT,
+        agyValidate: false,
+        sha256: overrideUpper,
+      });
+      assert.equal(entryOverride.release.sha256, 'abcdef01'.repeat(8));
+      assert.equal(
+        existsSync(distPluginDir),
+        false,
+        'explicit sha256 must stage in temp dir without creating dist/plugin'
+      );
+
+      // Positional (repoDir, { gitRepo, sha256 }) form also preserves existing dist/plugin files untouched
+      mkdirSync(distPluginDir, { recursive: true });
+      const sentinelBytes = Buffer.from('ci-built-canonical-tarball-bytes');
+      const sentinelSha = createHash('sha256').update(sentinelBytes).digest('hex');
+      writeFileSync(tarPath, sentinelBytes);
+      writeFileSync(shaPath, `${sentinelSha}  agy-prism-plugin-1.0.0.tgz\n`, 'utf8');
+
+      const positionalOverride = buildRegistryEntry(pluginDir, {
+        gitRepo: 'https://github.com/octocat/agy-prism-custom',
+        sha256: 'f'.repeat(64),
+        kitRoot: KIT_ROOT,
+        agyValidate: false,
+      });
+      assert.equal(positionalOverride.release.sha256, 'f'.repeat(64));
+      assert.equal(
+        positionalOverride.release.tarballUrl,
+        'https://github.com/octocat/agy-prism-custom/releases/download/v1.0.0/agy-prism-plugin-1.0.0.tgz'
+      );
+      assert.equal(
+        Buffer.compare(readFileSync(tarPath), sentinelBytes),
+        0,
+        'explicit sha256 must not overwrite existing .tgz'
+      );
+
+      // (b) Malformed sha256 fails upfront BEFORE any gh commands in openRegistryPr
+      for (const badSha of ['', 'not-hex', 'a'.repeat(63), 'g'.repeat(64), 12345]) {
+        let ghInvoked = false;
+        assert.throws(
+          () =>
+            openRegistryPr({
+              repoRoot: pluginDir,
+              sha256: badSha,
+              kitRoot: KIT_ROOT,
+              agyValidate: false,
+              execFn: () => {
+                ghInvoked = true;
+                return '';
+              },
+            }),
+          /sha256/i
+        );
+        assert.equal(ghInvoked, false, `execFn must not run for malformed sha256=${String(badSha)}`);
+      }
+
+      // Rejects sha256 on standalone sidecar repos where sha256 is not part of release
+      const sidecarDir = join(tmp, 'antigravity-solo');
+      scaffolder.scaffoldProject({
+        name: 'solo',
+        archetype: 'sidecar-ui',
+        targetDir: sidecarDir,
+        github: 'octocat',
+      });
+      assert.throws(
+        () =>
+          buildRegistryEntry({
+            repoRoot: sidecarDir,
+            sha256: 'a'.repeat(64),
+            kitRoot: KIT_ROOT,
+          }),
+        /only supported for plugin/i
+      );
+
+      // (c1) Matching .tgz + .tgz.sha256 in dist/plugin returns recorded digest without rebuilding .tgz
+      const reusedBoth = buildRegistryEntry({
+        repoRoot: pluginDir,
+        kitRoot: KIT_ROOT,
+        agyValidate: false,
+      });
+      assert.equal(reusedBoth.release.sha256, sentinelSha);
+      assert.equal(
+        Buffer.compare(readFileSync(tarPath), sentinelBytes),
+        0,
+        'existing matching .tgz must not be rebuilt/overwritten'
+      );
+
+      // (c2) Mismatched .tgz vs .tgz.sha256 throws an error
+      writeFileSync(shaPath, `${'0'.repeat(64)}  agy-prism-plugin-1.0.0.tgz\n`, 'utf8');
+      assert.throws(
+        () =>
+          buildRegistryEntry({
+            repoRoot: pluginDir,
+            kitRoot: KIT_ROOT,
+            agyValidate: false,
+          }),
+        /mismatch/i
+      );
+
+      // (c3) Downloaded .tgz.sha256 alone (without .tgz on disk) returns recorded digest without building .tgz
+      removeLinkOrDir(tarPath);
+      const downloadedCiSha = '9876543210abcdef'.repeat(4);
+      writeFileSync(shaPath, `${downloadedCiSha.toUpperCase()} *agy-prism-plugin-1.0.0.tgz\n`, 'utf8');
+      const fromShaFileOnly = buildRegistryEntry({
+        repoRoot: pluginDir,
+        kitRoot: KIT_ROOT,
+        agyValidate: false,
+      });
+      assert.equal(fromShaFileOnly.release.sha256, downloadedCiSha);
+      assert.equal(existsSync(tarPath), false, 'must not build local .tgz when .tgz.sha256 exists');
+
+      // Malformed .tgz.sha256 throws
+      writeFileSync(shaPath, 'corrupt-digest  agy-prism-plugin-1.0.0.tgz\n', 'utf8');
+      assert.throws(
+        () =>
+          buildRegistryEntry({
+            repoRoot: pluginDir,
+            kitRoot: KIT_ROOT,
+            agyValidate: false,
+          }),
+        /malformed/i
+      );
+
+      // (c4) Existing .tgz alone (without .tgz.sha256) hashes existing .tgz without overwriting it
+      removeLinkOrDir(shaPath);
+      writeFileSync(tarPath, sentinelBytes);
+      const fromTarOnly = buildRegistryEntry({
+        repoRoot: pluginDir,
+        kitRoot: KIT_ROOT,
+        agyValidate: false,
+      });
+      assert.equal(fromTarOnly.release.sha256, sentinelSha);
+      assert.equal(Buffer.compare(readFileSync(tarPath), sentinelBytes), 0);
+
+      // (d) Guards srcPluginDir against repo escape and symlinks
+      const outsidePlugin = join(tmp, 'outside-plugin');
+      mkdirSync(outsidePlugin, { recursive: true });
+      writeJsonNoBom(join(outsidePlugin, 'plugin.json'), {
+        name: 'agy-escaped',
+        description: 'escaped',
+        version: '1.0.0',
+      });
+
+      const escapeRepo = join(tmp, 'agy-escape-reg');
+      scaffolder.scaffoldProject({
+        name: 'escape-reg',
+        archetype: 'plugin',
+        targetDir: escapeRepo,
+        components: ['skills'],
+        github: 'octocat',
+      });
+      const escapePkgPath = join(escapeRepo, 'package.json');
+      const escapePkg = JSON.parse(readFileSync(escapePkgPath, 'utf8'));
+      writeJsonNoBom(escapePkgPath, {
+        ...escapePkg,
+        agyPlugin: { ...escapePkg.agyPlugin, pluginDir: '../outside-plugin' },
+      });
+      assert.throws(
+        () => buildRegistryEntry({ repoRoot: escapeRepo, kitRoot: KIT_ROOT, agyValidate: false }),
+        /escapes/i
+      );
+
+      removeLinkOrDir(join(escapeRepo, 'plugin'));
+      symlinkSync(
+        outsidePlugin,
+        join(escapeRepo, 'plugin'),
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+      writeJsonNoBom(escapePkgPath, escapePkg);
+      assert.throws(
+        () => buildRegistryEntry({ repoRoot: escapeRepo, kitRoot: KIT_ROOT, agyValidate: false }),
+        /symbolic link/i
+      );
+    } finally {
+      removeLinkOrDir(tmp);
+    }
+  });
 });
