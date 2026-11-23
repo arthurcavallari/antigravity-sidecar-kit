@@ -301,6 +301,114 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
     }
   });
 
+  it('runSidecarSetup skips default SIDECAR_DATA_ROOT process kills when sandboxed unless sidecarDataRoot is explicit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-sandbox-kill-guard-'));
+    try {
+      const repoDir = join(dir, 'repo');
+      mkdirSync(repoDir, { recursive: true });
+      writeFileSync(join(repoDir, 'sidecar.json'), '{}', 'utf8');
+      writeFileSync(join(repoDir, 'server.mjs'), '', 'utf8');
+
+      const fakeAppData = join(dir, 'fake-appdata');
+      const defaultSidecarRuntimeDir = join(fakeAppData, 'sidecar_data', 'sandbox-victim', 'data');
+      mkdirSync(defaultSidecarRuntimeDir, { recursive: true });
+      writeJsonNoBom(join(defaultSidecarRuntimeDir, 'runtime.json'), {
+        pid: 99999,
+        port: 54321,
+        webPort: 54321,
+        lsAddress: '127.0.0.1:59999',
+        csrfToken: 'live-ls-token',
+      });
+
+      const fakeEnv = { ...process.env, ANTIGRAVITY_APP_DATA_DIR: fakeAppData };
+      const execCalls = [];
+      const killCalls = [];
+      const spyExec = (file, fileArgs = []) => {
+        execCalls.push({ file, args: fileArgs });
+        const joined = `${file} ${fileArgs.join(' ')}`;
+        if (/54321/.test(joined)) return '99999\n';
+        return '';
+      };
+      const spyKill = (pid, sig) => {
+        killCalls.push({ pid, sig });
+      };
+
+      // 1. Sandboxed globalSidecarsDir + configJsonPath with no sidecarDataRoot must never probe/kill live PID
+      const sandboxRes = await runSidecarSetup({
+        sidecarId: 'sandbox-victim',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir: join(dir, 'sidecars'),
+        configJsonPath: join(dir, 'config.json'),
+        packagesDir: join(dir, 'packages'),
+        rpcOptions: { lsAddress: '', csrfToken: '', env: fakeEnv, killFn: spyKill },
+        execFn: spyExec,
+        restartDelayMs: 0,
+      });
+      assert.equal(sandboxRes.rpcRes.notified, false);
+      assert.equal(
+        execCalls.some(({ file, args }) => /taskkill|lsof|\bkill\b|powershell/i.test(`${file} ${args.join(' ')}`)),
+        false,
+        `expected zero process-probe/kill execFn calls in sandbox, got: ${JSON.stringify(execCalls)}`
+      );
+      assert.deepEqual(execCalls, []);
+      assert.deepEqual(killCalls, []);
+
+      // Also verify notifyManageSidecar isolates sidecarDataRoot when lsAddress/csrfToken are omitted in sandbox
+      const implicitRpcRes = await runSidecarSetup({
+        sidecarId: 'sandbox-victim',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir: join(dir, 'sidecars'),
+        configJsonPath: join(dir, 'config.json'),
+        packagesDir: join(dir, 'packages'),
+        rpcOptions: {
+          env: { ...fakeEnv, ANTIGRAVITY_LS_ADDRESS: '', ANTIGRAVITY_CSRF_TOKEN: '' },
+          killFn: spyKill,
+          fetchFn: async () => assert.fail('sandboxed setup must not contact cached LS from default SIDECAR_DATA_ROOT'),
+        },
+        execFn: spyExec,
+        restartDelayMs: 0,
+      });
+      assert.equal(implicitRpcRes.rpcRes.notified, false);
+      assert.deepEqual(execCalls, []);
+      assert.deepEqual(killCalls, []);
+
+      // 2. Passing an explicit rpcOptions.sidecarDataRoot still invokes process restart against that explicit root
+      const explicitRoot = join(dir, 'explicit-sidecar-data');
+      mkdirSync(join(explicitRoot, 'sandbox-victim', 'data'), { recursive: true });
+      writeJsonNoBom(join(explicitRoot, 'sandbox-victim', 'data', 'runtime.json'), {
+        pid: 99999,
+        port: 54321,
+        webPort: 54321,
+      });
+
+      const explicitRes = await runSidecarSetup({
+        sidecarId: 'sandbox-victim',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir: join(dir, 'sidecars'),
+        configJsonPath: join(dir, 'config.json'),
+        packagesDir: join(dir, 'packages'),
+        rpcOptions: {
+          lsAddress: '',
+          csrfToken: '',
+          sidecarDataRoot: explicitRoot,
+          env: fakeEnv,
+          killFn: spyKill,
+        },
+        execFn: spyExec,
+        restartDelayMs: 0,
+      });
+      assert.equal(explicitRes.rpcRes.notified, true);
+      assert.equal(explicitRes.rpcRes.viaProcessRestart, 'pid:99999');
+      assert.ok(execCalls.length > 0, 'expected port probe against explicit sidecarDataRoot');
+      assert.deepEqual(killCalls, [{ pid: 99999, sig: 'SIGTERM' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('createAssetHandler injects UI token into local HTML asset links and createAgyCssHandler serves CSS', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'kit-server-test-'));
     try {
