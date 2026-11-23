@@ -269,13 +269,13 @@ await runSidecarSetup({
 });
 ```
 
-Command-line flags read from `args` (default `process.argv`): `--skip-tests`, `--uninstall`, and `--force`.
+Command-line flags read from `args` (default `process.argv`): `--copy`, `--link`, `--skip-tests`, `--uninstall`, and `--force` (plus programmatic `{ copy: true }`).
 
 What `runSidecarSetup` handles automatically:
 1. Verifies Node.js `>= 20.0.0` and all `requiredFiles`.
 2. Refuses to continue if `~/.gemini/config/sidecars/<id>` is a real directory (an in-place checkout) rather than a link, unless setup is running from inside that directory or `--force` is passed. Nothing is run, copied, or deleted before this check.
 3. Runs `testFiles` via `node --test` unless `--skip-tests` is passed.
-4. **Ephemeral `_npx` Copy & SDK Bundling (`resolvePermanentLinkSource`)**: When executed via `npx`, copies the package out of the temporary `_npx` cache into `~/.gemini/hangar/packages/<id>@<version>` and guarantees `node_modules/antigravity-sidecar-kit` is present inside the permanent copy whether npm nested or hoisted the dependency. **Only `antigravity-sidecar-kit` is carried over**: sidecars installed this way must have no other runtime dependencies, and setup warns if `package.json` lists any.
+4. **Snapshot Copy vs. Live Checkout Link (`resolvePermanentLinkSource`)**: When executed via `npx` — or from a local checkout with `--copy` (`npm run setup -- --copy` / `npm run setup:copy`) — copies the package into `~/.gemini/antigravity/hangar/packages/<id>@<version>` (excluding `.git`, `.superpowers`, `.idea`, `.vscode`) and guarantees real `node_modules/antigravity-sidecar-kit` files are bundled inside the snapshot. Using `--copy` decouples the running sidecar from your git working tree so Antigravity's runtime `sidecar.json` `workspace_uris` updates never dirty `git status`. Without `--copy` (or when `--link` is passed), local checkouts link directly to the working tree for live development. **Only `antigravity-sidecar-kit` is carried over in snapshot copies**: sidecars installed this way must have no other runtime dependencies, and setup warns if `package.json` lists any.
 5. Links `~/.gemini/config/sidecars/<id>` using an NTFS directory junction on Windows or symlink on macOS/Linux.
 6. Enables `sidecars[id].enabled = true` in `~/.gemini/config/config.json` (preserving `projectId`, written atomically via temp file + rename).
 7. Hot-reloads the sidecar via `ManageSidecar` RPC (`SIDECAR_ACTION_RESTART` $\rightarrow$ `SIDECAR_ACTION_ENABLE`) or `killSidecarProcessByPortOrPid` fallback.

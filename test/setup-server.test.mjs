@@ -978,4 +978,127 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       },
     ]);
   });
+
+  it('runSidecarSetup --copy installs an isolated Hangar package snapshot so runtime sidecar.json mutations never dirty the git checkout', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-setup-copy-mode-'));
+    try {
+      const repoDir = join(dir, 'repo');
+      const sc = scaffoldSidecarProject({ name: 'snap-tool', targetDir: repoDir });
+      assert.equal(sc.id, 'snap-tool');
+
+      const pkgPath = join(repoDir, 'package.json');
+      const pkg = readJsonSafe(pkgPath);
+      assert.equal(pkg.scripts['setup:copy'], 'node setup.mjs --copy');
+      pkg.version = '1.2.0';
+      writeJsonNoBom(pkgPath, pkg);
+
+      // Populate dev-only directories and a junctioned node_modules/antigravity-sidecar-kit (file:.. simulation)
+      mkdirSync(join(repoDir, '.git'), { recursive: true });
+      writeFileSync(join(repoDir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
+      mkdirSync(join(repoDir, '.superpowers', 'sdd'), { recursive: true });
+      writeFileSync(join(repoDir, '.superpowers', 'sdd', 'progress.md'), '# scratch\n', 'utf8');
+      mkdirSync(join(repoDir, '.idea'), { recursive: true });
+      writeFileSync(join(repoDir, '.idea', 'workspace.xml'), '<project/>', 'utf8');
+
+      const fakeExternalKit = join(dir, 'fake-kit-target');
+      mkdirSync(fakeExternalKit, { recursive: true });
+      writeJsonNoBom(join(fakeExternalKit, 'package.json'), { name: 'antigravity-sidecar-kit', version: '0.0.1' });
+      mkdirSync(join(repoDir, 'node_modules'), { recursive: true });
+      symlinkSync(
+        fakeExternalKit,
+        join(repoDir, 'node_modules', 'antigravity-sidecar-kit'),
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+
+      const globalSidecarsDir = join(dir, 'sidecars');
+      const configJsonPath = join(dir, 'config.json');
+      const packagesDir = join(dir, 'packages');
+
+      // 1. Default install from local checkout links directly to repoDir
+      const linkRes = await runSidecarSetup({
+        sidecarId: 'snap-tool',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+      });
+      assert.equal(linkRes.installMode, 'link');
+      assert.equal(linkRes.linkedTo, realpathSync(repoDir));
+
+      // 2. --copy snapshots into packages/snap-tool@1.2.0 and repoints sidecars/snap-tool there
+      const copyRes = await runSidecarSetup({
+        sidecarId: 'snap-tool',
+        repoRoot: repoDir,
+        args: ['--copy', '--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+      });
+      const expectedSnapshotDir = join(packagesDir, 'snap-tool@1.2.0');
+      assert.equal(copyRes.installMode, 'copy');
+      assert.equal(copyRes.linkedTo, realpathSync(expectedSnapshotDir));
+      assert.equal(realpathSync(join(globalSidecarsDir, 'snap-tool')), realpathSync(expectedSnapshotDir));
+      assert.equal(existsSync(join(expectedSnapshotDir, '.git')), false);
+      assert.equal(existsSync(join(expectedSnapshotDir, '.superpowers')), false);
+      assert.equal(existsSync(join(expectedSnapshotDir, '.idea')), false);
+      assert.equal(
+        existsSync(join(expectedSnapshotDir, 'node_modules', 'antigravity-sidecar-kit', 'lib', 'setup.mjs')),
+        true,
+        'symlinked dev kit must be replaced by real bundled kit files'
+      );
+
+      // Simulate Antigravity Language Server writing workspace_uris into sidecars/snap-tool/sidecar.json
+      const activeSidecarJsonPath = join(globalSidecarsDir, 'snap-tool', 'sidecar.json');
+      const mutatedManifest = readJsonSafe(activeSidecarJsonPath);
+      mutatedManifest.agent_permissions = { workspace_uris: ['file:///c:/Users/dev/project'] };
+      writeJsonNoBom(activeSidecarJsonPath, mutatedManifest);
+
+      const repoSidecarJson = readJsonSafe(join(repoDir, 'sidecar.json'));
+      assert.deepEqual(
+        repoSidecarJson.agent_permissions,
+        { workspace_uris: [] },
+        'git checkout sidecar.json must remain clean when installed with --copy'
+      );
+
+      // 3. --link explicitly overrides { copy: true } back to live repo link
+      const relinkRes = await runSidecarSetup({
+        sidecarId: 'snap-tool',
+        repoRoot: repoDir,
+        copy: true,
+        args: ['--link', '--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+      });
+      assert.equal(relinkRes.installMode, 'link');
+      assert.equal(relinkRes.linkedTo, realpathSync(repoDir));
+
+      // 4. Edge-case guards: self-copy is a safe no-op and nested packagesDir inside repoRoot throws
+      const selfCopy = resolvePermanentLinkSource(expectedSnapshotDir, {
+        sidecarId: 'snap-tool',
+        version: '1.2.0',
+        packagesDir,
+        copy: true,
+      });
+      assert.equal(selfCopy, realpathSync(expectedSnapshotDir));
+      assert.equal(existsSync(join(expectedSnapshotDir, 'server.mjs')), true);
+
+      assert.throws(
+        () =>
+          resolvePermanentLinkSource(repoDir, {
+            sidecarId: 'snap-tool',
+            version: '1.2.0',
+            packagesDir: join(repoDir, '.nested-packages'),
+            copy: true,
+          }),
+        /packagesDir must not be inside repoRoot/i
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
