@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -13,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   CONFIG_JSON_PATH,
   DEFAULT_MCP_CONFIG_PATH,
@@ -22,9 +23,9 @@ import {
 } from '../lib/config.mjs';
 import { KIT_ROOT, removeLinkOrDir } from '../lib/setup.mjs';
 import * as scaffolder from '../lib/scaffolder.mjs';
-import { resolveAgyExecutable } from '../lib/cli/agy-bin.mjs';
+import { resolveAgyExecutable, spawnResolvedExecutable } from '../lib/cli/agy-bin.mjs';
 import { buildPluginProject } from '../lib/cli/build-plugin.mjs';
-import { runPackSmoke } from '../lib/cli/pack-smoke.mjs';
+import { parseNpmPackJson, resolveNpmCommand, runPackSmoke } from '../lib/cli/pack-smoke.mjs';
 
 function writeStubAgy(
   binDir,
@@ -497,6 +498,214 @@ describe('Task 5: agy-bin, build-plugin, and pack-smoke', () => {
       assert.equal(res.npmTarball, null);
       assert.equal(typeof res.pluginTarball, 'string');
       assert.match(res.pluginTarball, /agy-smoke-beacon-plugin-1\.0\.0\.tgz$/);
+    } finally {
+      removeLinkOrDir(tmp);
+    }
+  });
+
+  it('regression (Findings 1 & 3): npm pack ignores prepack/postpack scripts, parses bracketed stdout prefixes, and ignores yarn/pnpm npm_execpath', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'agy-pack-reg13-'));
+    const prevNpmExecPath = process.env.npm_execpath;
+    try {
+      // Finding 1a: parseNpmPackJson skips leading bracketed log text while preserving nested files[] array
+      const noisyStdout = [
+        '[build] compiling assets [1/2]',
+        '[warn] notice [ok]',
+        JSON.stringify(
+          [
+            {
+              id: 'antigravity-demo@1.0.0',
+              files: [{ path: 'package.json' }, { path: 'server.mjs' }],
+              filename: 'antigravity-demo-1.0.0.tgz',
+            },
+          ],
+          null,
+          2
+        ),
+      ].join('\n');
+      const parsed = parseNpmPackJson(noisyStdout, '/repo');
+      assert.equal(parsed[0].filename, 'antigravity-demo-1.0.0.tgz');
+      assert.throws(() => parseNpmPackJson('[not-json', '/repo'), /Unexpected npm pack/);
+
+      // Finding 3: resolveNpmCommand rejects yarn.js / pnpm.mjs and honors explicit env.npm_execpath = ''
+      const yarnScript = join(tmp, 'yarn.js');
+      const pnpmScript = join(tmp, 'pnpm.mjs');
+      const validNpmCli = join(tmp, 'npm-cli.js');
+      writeFileSync(yarnScript, 'process.exit(99);\n', 'utf8');
+      writeFileSync(pnpmScript, 'process.exit(98);\n', 'utf8');
+      writeFileSync(validNpmCli, '// stub npm-cli.js\n', 'utf8');
+
+      const yarnResolved = resolveNpmCommand({ ...process.env, npm_execpath: yarnScript });
+      assert.notEqual(yarnResolved.script, yarnScript);
+
+      const pnpmResolved = resolveNpmCommand({ ...process.env, npm_execpath: pnpmScript });
+      assert.notEqual(pnpmResolved.script, pnpmScript);
+
+      const npmCliResolved = resolveNpmCommand({ ...process.env, npm_execpath: validNpmCli });
+      assert.equal(npmCliResolved.type, 'node-script');
+      assert.equal(npmCliResolved.script, validNpmCli);
+
+      process.env.npm_execpath = validNpmCli;
+      const clearedResolved = resolveNpmCommand({ PATH: '', Path: '', npm_execpath: '' });
+      assert.notEqual(clearedResolved.script, validNpmCli);
+      if (prevNpmExecPath === undefined) delete process.env.npm_execpath;
+      else process.env.npm_execpath = prevNpmExecPath;
+
+      // End-to-end Finding 1b & Finding 3: prepack/postpack poison scripts + yarn.js npm_execpath
+      const sidecarDir = join(tmp, 'antigravity-hookguard');
+      scaffolder.scaffoldProject({
+        name: 'hookguard',
+        archetype: 'sidecar-ui',
+        targetDir: sidecarDir,
+      });
+      const pkgPath = join(sidecarDir, 'package.json');
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      pkg.scripts = {
+        ...pkg.scripts,
+        prepack: 'node -e "process.exit(42)"',
+        prepare: 'node -e "process.exit(43)"',
+        postpack: 'node -e "process.exit(44)"',
+      };
+      writeJsonNoBom(pkgPath, pkg);
+
+      const res = await runPackSmoke({
+        repoRoot: sidecarDir,
+        kitRoot: KIT_ROOT,
+        env: {
+          ...process.env,
+          npm_execpath: yarnScript,
+          npm_config_registry: 'http://127.0.0.1:1',
+          npm_config_fetch_retries: '0',
+        },
+      });
+      assert.match(res.npmTarball, /antigravity-hookguard-1\.0\.0\.tgz$/);
+    } finally {
+      if (prevNpmExecPath === undefined) delete process.env.npm_execpath;
+      else process.env.npm_execpath = prevNpmExecPath;
+      removeLinkOrDir(tmp);
+    }
+  });
+
+  it('regression (Finding 2): buildPluginProject rejects overlapping builtDir/srcPluginDir/repoRoot before deleting source files', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'agy-build-reg2-'));
+    try {
+      const repoDir = join(tmp, 'agy-overlap');
+      scaffolder.scaffoldProject({
+        name: 'overlap',
+        archetype: 'plugin',
+        targetDir: repoDir,
+        components: ['skills'],
+      });
+
+      // Move plugin/ to dist/agy-overlap and configure outDir: "dist" so builtDir === srcPluginDir
+      const nestedSrc = join(repoDir, 'dist', 'agy-overlap');
+      mkdirSync(join(repoDir, 'dist'), { recursive: true });
+      cpSync(join(repoDir, 'plugin'), nestedSrc, { recursive: true });
+
+      const pkgPath = join(repoDir, 'package.json');
+      const basePkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+      writeJsonNoBom(pkgPath, {
+        ...basePkg,
+        agyPlugin: {
+          ...basePkg.agyPlugin,
+          pluginDir: 'dist/agy-overlap',
+          outDir: 'dist',
+        },
+      });
+
+      assert.throws(
+        () => buildPluginProject({ repoRoot: repoDir, tar: false, agyValidate: false }),
+        /overlap/i
+      );
+      assert.equal(
+        existsSync(join(nestedSrc, 'plugin.json')),
+        true,
+        'srcPluginDir must not be deleted when builtDir overlaps srcPluginDir'
+      );
+
+      // Restore standard pluginDir and verify outRoot: dirname(repoDir) (where builtDir === repoDir) is rejected
+      writeJsonNoBom(pkgPath, basePkg);
+      assert.throws(
+        () =>
+          buildPluginProject({
+            repoRoot: repoDir,
+            outRoot: dirname(repoDir),
+            tar: false,
+            agyValidate: false,
+          }),
+        /repository root|overlap/i
+      );
+      assert.equal(existsSync(pkgPath), true, 'repoDir must not be deleted when builtDir === repoDir');
+    } finally {
+      removeLinkOrDir(tmp);
+    }
+  });
+
+  it('regression (Finding 4): literal % paths, unexpanded %TEMP%, and trailing backslashes survive .cmd execution', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'agy-pct-reg4-'));
+    try {
+      const pctWorkspace = join(tmp, 'feat%2Fbranch');
+      const repoDir = join(pctWorkspace, 'agy-pct-plug');
+      scaffolder.scaffoldProject({
+        name: 'pct-plug',
+        archetype: 'plugin',
+        targetDir: repoDir,
+        components: ['skills'],
+      });
+
+      const validateLog = join(tmp, 'pct-validate.jsonl');
+      const agyHome = join(pctWorkspace, 'agy-home');
+      writeStubAgy(join(agyHome, '.gemini', 'bin'), '1.5.14', {
+        recordValidateFile: validateLog,
+      });
+      const pathWithoutAgy = stripAgyFromPath(process.env.PATH || process.env.Path || '');
+
+      const built = buildPluginProject({
+        repoRoot: repoDir,
+        tar: false,
+        agyValidate: true,
+        env: {
+          ...process.env,
+          HOME: agyHome,
+          USERPROFILE: agyHome,
+          PATH: pathWithoutAgy,
+        },
+      });
+
+      assert.equal(built.agyValidated, true);
+      assert.ok(built.dir.includes('feat%2Fbranch'));
+      const logged = JSON.parse(readFileSync(validateLog, 'utf8').trim());
+      assert.equal(logged.args[3], built.dir, 'literal %2F in builtDir must not become %%2F');
+
+      if (process.platform === 'win32') {
+        const echoImpl = join(pctWorkspace, 'echo-args.mjs');
+        const echoCmd = join(pctWorkspace, 'echo-args.cmd');
+        writeFileSync(
+          echoImpl,
+          'process.stdout.write(JSON.stringify(process.argv.slice(2)));\n',
+          'utf8'
+        );
+        writeFileSync(
+          echoCmd,
+          `@echo off\r\n"${process.execPath}" "%~dp0echo-args.mjs" %*\r\n`,
+          'utf8'
+        );
+        const trickyArgs = [
+          'C:\\workspace\\feat%2Fbranch\\dist\\plugin\\agy-foo',
+          'literal-%TEMP%-token',
+          'C:\\dir with spaces\\trailing\\',
+          '',
+          'amp&pipe|caret^paren(1)',
+        ];
+        const run = spawnResolvedExecutable(
+          echoCmd,
+          trickyArgs,
+          { encoding: 'utf8', env: process.env, windowsHide: true },
+          'win32'
+        );
+        assert.equal(run.status, 0, run.stderr);
+        assert.deepEqual(JSON.parse(run.stdout), trickyArgs);
+      }
     } finally {
       removeLinkOrDir(tmp);
     }
