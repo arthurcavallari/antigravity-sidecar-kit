@@ -803,4 +803,307 @@ describe('Task 6: registry-entry & Hangar tier inference', () => {
       removeLinkOrDir(tmp);
     }
   });
+
+  it('regression (Critical #1): inferPluginTier escalates sidecar ${PLUGIN_ROOT}/.., command escapes, absolute/~/ paths, --flag= & $PLUGIN_ROOT vars, and inspects in-root string hooks/mcpServers without flagging cmd /c', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'agy-tier-crit1-'));
+    try {
+      const makePlug = (sub, manifestExtra = {}) => {
+        const dir = join(tmp, sub);
+        mkdirSync(dir, { recursive: true });
+        writeJsonNoBom(join(dir, 'plugin.json'), {
+          name: `agy-${sub}`,
+          description: 'fixture',
+          version: '1.0.0',
+          ...manifestExtra,
+        });
+        return dir;
+      };
+
+      // 1. Nested sidecar ${PLUGIN_ROOT}/../outside.mjs and command: "../../../outside"
+      const scRootVar = makePlug('sc-rootvar');
+      mkdirSync(join(scRootVar, 'sidecars', 'panel'), { recursive: true });
+      writeJsonNoBom(join(scRootVar, 'sidecars', 'panel', 'sidecar.json'), {
+        command: 'node',
+        args: ['${PLUGIN_ROOT}/../outside.mjs'],
+      });
+      assert.equal(inferPluginTier(scRootVar).tier, 'TIER_3_AGENT_CONTROL');
+
+      const scCmdEsc = makePlug('sc-cmd-esc');
+      mkdirSync(join(scCmdEsc, 'sidecars', 'panel'), { recursive: true });
+      writeJsonNoBom(join(scCmdEsc, 'sidecars', 'panel', 'sidecar.json'), {
+        command: '../../../outside',
+        args: [],
+      });
+      assert.equal(inferPluginTier(scCmdEsc).tier, 'TIER_3_AGENT_CONTROL');
+
+      // 2. Absolute and ~/ paths in cwd, hooks string, and mcpServers string
+      for (const [idx, badCwd] of ['/tmp/outside', 'C:\\outside', '~/outside'].entries()) {
+        const d = makePlug(`abs-cwd-${idx}`);
+        writeJsonNoBom(join(d, 'mcp_config.json'), {
+          mcpServers: { srv: { command: 'node', args: ['srv.mjs'], cwd: badCwd } },
+        });
+        assert.equal(inferPluginTier(d).tier, 'TIER_3_AGENT_CONTROL', `cwd=${badCwd}`);
+      }
+
+      const absHooks = makePlug('abs-hooks', { hooks: '/outside/hooks.json' });
+      assert.equal(inferPluginTier(absHooks).tier, 'TIER_3_AGENT_CONTROL');
+
+      const absMcp = makePlug('abs-mcp', { mcpServers: '/outside/mcp.json' });
+      assert.equal(inferPluginTier(absMcp).tier, 'TIER_3_AGENT_CONTROL');
+
+      // 3. Prefixed --config=${PLUGIN_ROOT}/.. and unbraced $PLUGIN_ROOT / $CLAUDE_PLUGIN_ROOT / ${GEMINI_PLUGIN_PATH}
+      for (const [idx, badArg] of [
+        '--config=${PLUGIN_ROOT}/../outside.json',
+        '$PLUGIN_ROOT/../outside.mjs',
+        '$CLAUDE_PLUGIN_ROOT/../outside.mjs',
+        '${GEMINI_PLUGIN_PATH}/../outside.mjs',
+      ].entries()) {
+        const d = makePlug(`var-esc-${idx}`);
+        writeJsonNoBom(join(d, 'mcp_config.json'), {
+          mcpServers: { srv: { command: 'node', args: [badArg] } },
+        });
+        assert.equal(inferPluginTier(d).tier, 'TIER_3_AGENT_CONTROL', `arg=${badArg}`);
+      }
+
+      // Windows cmd /c switch in args must NOT be misclassified as a POSIX absolute path
+      const cmdSwitchDir = makePlug('win-cmd-switch');
+      writeJsonNoBom(join(cmdSwitchDir, 'mcp_config.json'), {
+        mcpServers: { srv: { command: 'cmd.exe', args: ['/d', '/s', '/c', 'node server.mjs'] } },
+      });
+      assert.equal(inferPluginTier(cmdSwitchDir).tier, 'TIER_2_LOCAL_TOOLING');
+
+      // 4. In-root string hooks & mcpServers load and inspect target JSON (and escalate if missing/symlinked out)
+      const strHooksT2 = makePlug('str-hooks-t2', { hooks: './custom/hooks.json' });
+      mkdirSync(join(strHooksT2, 'custom'), { recursive: true });
+      writeJsonNoBom(join(strHooksT2, 'custom', 'hooks.json'), {
+        SessionStart: [{ type: 'command', command: 'node start.mjs' }],
+      });
+      assert.equal(inferPluginTier(strHooksT2).tier, 'TIER_2_LOCAL_TOOLING');
+
+      const strHooksT3 = makePlug('str-hooks-t3', { hooks: './custom/hooks.json' });
+      mkdirSync(join(strHooksT3, 'custom'), { recursive: true });
+      writeJsonNoBom(join(strHooksT3, 'custom', 'hooks.json'), {
+        Stop: [{ type: 'command', command: 'node stop.mjs' }],
+      });
+      assert.equal(inferPluginTier(strHooksT3).tier, 'TIER_3_AGENT_CONTROL');
+
+      const strHooksMissing = makePlug('str-hooks-missing', { hooks: './custom/missing.json' });
+      assert.equal(inferPluginTier(strHooksMissing).tier, 'TIER_3_AGENT_CONTROL');
+
+      const strMcpT2 = makePlug('str-mcp-t2', { mcpServers: './custom/mcp.json' });
+      mkdirSync(join(strMcpT2, 'custom'), { recursive: true });
+      writeJsonNoBom(join(strMcpT2, 'custom', 'mcp.json'), {
+        mcpServers: { local: { command: 'node', args: ['${PLUGIN_ROOT}/server.mjs'] } },
+      });
+      assert.equal(inferPluginTier(strMcpT2).tier, 'TIER_2_LOCAL_TOOLING');
+    } finally {
+      removeLinkOrDir(tmp);
+    }
+  });
+
+  it('regression (Important #1): standalone sidecar tier inference upgrades runtime child_process imports to TIER_2 and ignores test/, scripts/, dist/, and setup.mjs', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'agy-sc-tier-'));
+    try {
+      const scDir = join(tmp, 'antigravity-gauge');
+      scaffolder.scaffoldProject({
+        name: 'gauge',
+        archetype: 'sidecar-ui',
+        targetDir: scDir,
+        github: 'octocat',
+      });
+
+      // Test/build/setup files referencing child_process or sidecar.agent.sendMessage must NOT escalate
+      writeFileSync(
+        join(scDir, 'test', 'extra.test.mjs'),
+        'import "node:child_process";\nconst x = () => sidecar.agent.sendMessage("in test");\n',
+        'utf8'
+      );
+      mkdirSync(join(scDir, 'scripts'), { recursive: true });
+      writeFileSync(
+        join(scDir, 'scripts', 'release-helper.mjs'),
+        'import "child_process";\nsidecar.agent.startConversation();\n',
+        'utf8'
+      );
+      mkdirSync(join(scDir, 'dist'), { recursive: true });
+      writeFileSync(join(scDir, 'dist', 'stale.mjs'), 'sidecar.agent.sendMessage("stale");\n', 'utf8');
+      writeFileSync(
+        join(scDir, 'setup.mjs'),
+        `${readFileSync(join(scDir, 'setup.mjs'), 'utf8')}\n// import 'node:child_process'; sidecar.agent.sendMessage('setup');\n`,
+        'utf8'
+      );
+
+      const entryT1 = buildRegistryEntry({ repoRoot: scDir, kitRoot: KIT_ROOT });
+      assert.equal(entryT1.capabilityTier, 'TIER_1_TELEMETRY');
+
+      // Runtime server.mjs importing node:child_process upgrades to TIER_2_LOCAL_TOOLING
+      const origServer = readFileSync(join(scDir, 'server.mjs'), 'utf8');
+      writeFileSync(
+        join(scDir, 'server.mjs'),
+        `import { execFile } from 'node:child_process';\nvoid execFile;\n${origServer}`,
+        'utf8'
+      );
+      const entryT2 = buildRegistryEntry({ repoRoot: scDir, kitRoot: KIT_ROOT });
+      assert.equal(entryT2.capabilityTier, 'TIER_2_LOCAL_TOOLING');
+
+      // Runtime ui/app.js calling sidecar.agent.sendMessage upgrades to TIER_3_AGENT_CONTROL
+      writeFileSync(
+        join(scDir, 'ui', 'app.js'),
+        `${readFileSync(join(scDir, 'ui', 'app.js'), 'utf8')}\nwindow.sidecar.agent.sendMessage('go');\n`,
+        'utf8'
+      );
+      const entryT3 = buildRegistryEntry({ repoRoot: scDir, kitRoot: KIT_ROOT });
+      assert.equal(entryT3.capabilityTier, 'TIER_3_AGENT_CONTROL');
+    } finally {
+      removeLinkOrDir(tmp);
+    }
+  });
+
+  it('regression (Important #2): upsertRegistryFile rejects broken hangar, featuredIds, and packages element structures without modifying disk', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'agy-upsert-struct-'));
+    try {
+      const validEntry = {
+        id: 'agy-nova',
+        name: 'Nova',
+        kind: 'plugin',
+        tagline: 'Nova plugin.',
+        author: { name: 'Octocat', github: 'octocat' },
+        latestVersion: '1.0.0',
+        pricing: 'free',
+        categories: ['utilities'],
+        capabilityTier: 'TIER_1_TELEMETRY',
+        license: 'MIT',
+        homepage: 'https://github.com/octocat/agy-nova',
+        release: {
+          tarballUrl:
+            'https://github.com/octocat/agy-nova/releases/download/v1.0.0/agy-nova-plugin-1.0.0.tgz',
+          sha256: 'd'.repeat(64),
+        },
+      };
+
+      const invalidRegistries = [
+        ['missing-hangar.json', '{"packages":[]}\n'],
+        ['null-hangar.json', '{"hangar":null,"packages":[]}\n'],
+        ['wrong-hangar-id.json', '{"hangar":{"id":"not-hangar"},"packages":[]}\n'],
+        ['bad-featured.json', '{"hangar":{"id":"hangar"},"featuredIds":"bad","packages":[]}\n'],
+        ['null-pkg-item.json', '{"hangar":{"id":"hangar"},"packages":[null]}\n'],
+        ['bad-pkg-id.json', '{"hangar":{"id":"hangar"},"packages":[{"id":"../evil"}]}\n'],
+      ];
+
+      for (const [name, raw] of invalidRegistries) {
+        const p = join(tmp, name);
+        writeFileSync(p, raw, 'utf8');
+        assert.throws(() => upsertRegistryFile(p, validEntry), undefined, name);
+        assert.equal(readFileSync(p, 'utf8'), raw, `${name} must remain untouched`);
+      }
+    } finally {
+      removeLinkOrDir(tmp);
+    }
+  });
+
+  it('regression (Important #3): openRegistryPr handles "cannot be forked", forwards env, syncs upstream remote, and passes --head <forkOwner>:<branch> on contributor forks', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'agy-reg-pr-fix-'));
+    try {
+      const pluginDir = join(tmp, 'agy-flare');
+      scaffolder.scaffoldProject({
+        name: 'flare',
+        archetype: 'plugin',
+        targetDir: pluginDir,
+        components: ['skills'],
+        author: 'Flare Dev',
+        github: 'octocat',
+      });
+
+      const customEnv = { ...process.env, GH_TOKEN: 'ghs_test_secret_token_123' };
+
+      // Case A: Self-fork ("arthurcavallari/antigravity-hangar cannot be forked") falls back to gh repo clone and forwards env
+      const selfCalls = [];
+      const selfRes = openRegistryPr({
+        repoRoot: pluginDir,
+        hangarRepo: 'arthurcavallari/antigravity-hangar',
+        kitRoot: KIT_ROOT,
+        agyValidate: false,
+        env: customEnv,
+        execFn: (cmd, args, opts) => {
+          selfCalls.push({ cmd, args, env: opts?.env });
+          if (cmd === 'gh' && args[0] === 'repo' && args[1] === 'fork') {
+            throw new Error('arthurcavallari/antigravity-hangar cannot be forked');
+          }
+          if (cmd === 'gh' && args[0] === 'repo' && args[1] === 'clone') {
+            const cloneDir = args[3];
+            mkdirSync(cloneDir, { recursive: true });
+            writeJsonNoBom(join(cloneDir, 'registry.json'), makeRegistryFixture([]));
+            return '';
+          }
+          if (cmd === 'git' && args[0] === 'remote' && args[2] === 'upstream') {
+            throw new Error("error: No such remote 'upstream'");
+          }
+          if (cmd === 'git' && args[0] === 'remote' && args[2] === 'origin') {
+            return 'https://github.com/arthurcavallari/antigravity-hangar.git\n';
+          }
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+            return 'https://github.com/arthurcavallari/antigravity-hangar/pull/99\n';
+          }
+          return '';
+        },
+      });
+
+      assert.equal(selfRes.prUrl, 'https://github.com/arthurcavallari/antigravity-hangar/pull/99');
+      assert.ok(selfCalls.every((c) => c.env?.GH_TOKEN === 'ghs_test_secret_token_123'));
+      assert.ok(selfCalls.some((c) => c.cmd === 'gh' && c.args[0] === 'repo' && c.args[1] === 'clone'));
+      const selfPrCall = selfCalls.find((c) => c.cmd === 'gh' && c.args[0] === 'pr');
+      assert.equal(selfPrCall.args.includes('--head'), false);
+
+      // Case B: Contributor fork with pre-existing upstream remote bases off upstream/FETCH_HEAD and passes --head octocat:<branch>
+      const forkCalls = [];
+      const forkRes = openRegistryPr({
+        repoRoot: pluginDir,
+        hangarRepo: 'arthurcavallari/antigravity-hangar',
+        kitRoot: KIT_ROOT,
+        agyValidate: false,
+        env: customEnv,
+        execFn: (cmd, args) => {
+          forkCalls.push({ cmd, args });
+          if (cmd === 'gh' && args[0] === 'repo' && args[1] === 'fork') {
+            const dashIdx = args.indexOf('--');
+            const cloneDir = args[dashIdx + 1];
+            mkdirSync(cloneDir, { recursive: true });
+            writeJsonNoBom(join(cloneDir, 'registry.json'), makeRegistryFixture([]));
+            return '';
+          }
+          if (cmd === 'git' && args[0] === 'remote' && args[2] === 'upstream') {
+            return 'https://github.com/arthurcavallari/antigravity-hangar.git\n';
+          }
+          if (cmd === 'git' && args[0] === 'remote' && args[2] === 'origin') {
+            return 'git@github.com:octocat/antigravity-hangar.git\n';
+          }
+          if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'create') {
+            return 'https://github.com/arthurcavallari/antigravity-hangar/pull/100\n';
+          }
+          return '';
+        },
+      });
+
+      assert.equal(forkRes.prUrl, 'https://github.com/arthurcavallari/antigravity-hangar/pull/100');
+      assert.ok(
+        forkCalls.some(
+          (c) => c.cmd === 'git' && c.args[0] === 'fetch' && c.args.includes('upstream')
+        )
+      );
+      assert.ok(
+        forkCalls.some(
+          (c) =>
+            c.cmd === 'git' &&
+            c.args[0] === 'checkout' &&
+            c.args.includes('registry/agy-flare-1.0.0') &&
+            c.args.includes('FETCH_HEAD')
+        )
+      );
+      const forkPrCall = forkCalls.find((c) => c.cmd === 'gh' && c.args[0] === 'pr');
+      const headIdx = forkPrCall.args.indexOf('--head');
+      assert.notEqual(headIdx, -1);
+      assert.equal(forkPrCall.args[headIdx + 1], 'octocat:registry/agy-flare-1.0.0');
+    } finally {
+      removeLinkOrDir(tmp);
+    }
+  });
 });
