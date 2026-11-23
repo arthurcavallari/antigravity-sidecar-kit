@@ -199,6 +199,31 @@ describe('antigravity-sidecar-kit/config BOM-safe JSON helpers and config.json u
         SyntaxError
       );
       assert.equal(readFileSync(mcpPath, 'utf8'), corruptMcp);
+
+      // 4. Rejects non-plain-object JSON roots ([], null, primitives) and invalid mcpServers on both install and uninstall without modifying disk
+      for (const nonObjectPayload of ['[]', 'null', '"corrupt"', '42', '{"mcpServers":[]}', '{"mcpServers":null}']) {
+        writeFileSync(mcpPath, nonObjectPayload, 'utf8');
+        await assert.rejects(
+          () =>
+            syncMcpServerConfig({
+              serverName: 'notes-mcp',
+              mcpConfigPath: mcpPath,
+            }),
+          /Invalid (JSON|mcpServers) object/
+        );
+        assert.equal(readFileSync(mcpPath, 'utf8'), nonObjectPayload);
+
+        await assert.rejects(
+          () =>
+            syncMcpServerConfig({
+              serverName: 'notes-mcp',
+              uninstall: true,
+              mcpConfigPath: mcpPath,
+            }),
+          /Invalid (JSON|mcpServers) object/
+        );
+        assert.equal(readFileSync(mcpPath, 'utf8'), nonObjectPayload);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
