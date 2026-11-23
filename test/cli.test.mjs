@@ -45,10 +45,11 @@ describe('antigravity-sidecar-kit CLI', () => {
       const generatedPkg = JSON.parse(readFileSync(join(outDir, 'package.json'), 'utf8'));
       assert.equal(generatedPkg.dependencies['antigravity-sidecar-kit'], `^${kitPkg.version}`);
       const generatedServer = readFileSync(join(outDir, 'server.mjs'), 'utf8');
-      assert.match(generatedServer, /import \{ SidecarApp, Response \} from 'sidecar_sdk'/);
-      assert.match(generatedServer, /createAgyCssHandler\(\{ ResponseClass: Response \}\)/);
-      assert.match(generatedServer, /import \{ exitWithLanguageServer \} from 'antigravity-sidecar-kit\/lifecycle'/);
-      assert.match(generatedServer, /await app\.run\(\);\n[^\n]*\nexitWithLanguageServer\(\{ app \}\);/);
+      assert.doesNotMatch(generatedServer, /import \{ SidecarApp, Response \} from 'sidecar_sdk'/);
+      assert.match(generatedServer, /await import\('sidecar_sdk'\)\.catch\(\(\) => null\)/);
+      assert.match(generatedServer, /createSidecarApp/);
+      assert.match(generatedServer, /setupSidecarServer/);
+      assert.match(generatedServer, /exitWithLanguageServer/);
 
       const again = spawnSync(process.execPath, [CLI, 'init', 'demo', '--dir', outDir], { encoding: 'utf8' });
       assert.equal(again.status, 1, 'refuses to overwrite without --force');
