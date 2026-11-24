@@ -51,7 +51,9 @@
   "bin": {
     "antigravity-sidecar-kit": "bin/cli.mjs",
     "create-antigravity-sidecar": "bin/cli.mjs",
-    "agy-sidecar-kit": "bin/cli.mjs"
+    "create-agy": "bin/cli.mjs",
+    "agy-sidecar-kit": "bin/cli.mjs",
+    "agy-kit": "bin/cli.mjs"
   },
   "keywords": [
     "antigravity",

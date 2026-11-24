@@ -13,6 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonSafe, writeJsonNoBom } from '../lib/config.mjs';
@@ -297,6 +298,190 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
       assert.equal(isRealDirectory(inPlace), false);
       assert.equal(realpathSync(inPlace), forced.linkedTo);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('runSidecarSetup skips default SIDECAR_DATA_ROOT process kills when sandboxed unless sidecarDataRoot is explicit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-sandbox-kill-guard-'));
+    try {
+      const repoDir = join(dir, 'repo');
+      mkdirSync(repoDir, { recursive: true });
+      writeFileSync(join(repoDir, 'sidecar.json'), '{}', 'utf8');
+      writeFileSync(join(repoDir, 'server.mjs'), '', 'utf8');
+
+      const fakeAppData = join(dir, 'fake-appdata');
+      const defaultSidecarRuntimeDir = join(fakeAppData, 'sidecar_data', 'sandbox-victim', 'data');
+      mkdirSync(defaultSidecarRuntimeDir, { recursive: true });
+      writeJsonNoBom(join(defaultSidecarRuntimeDir, 'runtime.json'), {
+        pid: 99999,
+        port: 54321,
+        webPort: 54321,
+        lsAddress: '127.0.0.1:59999',
+        csrfToken: 'live-ls-token',
+      });
+
+      const fakeEnv = { ...process.env, ANTIGRAVITY_APP_DATA_DIR: fakeAppData };
+      const execCalls = [];
+      const killCalls = [];
+      const spyExec = (file, fileArgs = []) => {
+        execCalls.push({ file, args: fileArgs });
+        const joined = `${file} ${fileArgs.join(' ')}`;
+        if (/54321/.test(joined)) return '99999\n';
+        return '';
+      };
+      const spyKill = (pid, sig) => {
+        killCalls.push({ pid, sig });
+      };
+
+      // 1. Sandboxed globalSidecarsDir + configJsonPath with no sidecarDataRoot must never probe/kill live PID
+      const sandboxRes = await runSidecarSetup({
+        sidecarId: 'sandbox-victim',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir: join(dir, 'sidecars'),
+        configJsonPath: join(dir, 'config.json'),
+        packagesDir: join(dir, 'packages'),
+        rpcOptions: { lsAddress: '', csrfToken: '', env: fakeEnv, killFn: spyKill },
+        execFn: spyExec,
+        restartDelayMs: 0,
+      });
+      assert.equal(sandboxRes.rpcRes.notified, false);
+      assert.equal(
+        execCalls.some(({ file, args }) => /taskkill|lsof|\bkill\b|powershell/i.test(`${file} ${args.join(' ')}`)),
+        false,
+        `expected zero process-probe/kill execFn calls in sandbox, got: ${JSON.stringify(execCalls)}`
+      );
+      assert.deepEqual(execCalls, []);
+      assert.deepEqual(killCalls, []);
+
+      // Also verify notifyManageSidecar isolates sidecarDataRoot when lsAddress/csrfToken are omitted in sandbox
+      const implicitRpcRes = await runSidecarSetup({
+        sidecarId: 'sandbox-victim',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir: join(dir, 'sidecars'),
+        configJsonPath: join(dir, 'config.json'),
+        packagesDir: join(dir, 'packages'),
+        rpcOptions: {
+          env: { ...fakeEnv, ANTIGRAVITY_LS_ADDRESS: '', ANTIGRAVITY_CSRF_TOKEN: '' },
+          killFn: spyKill,
+          fetchFn: async () => assert.fail('sandboxed setup must not contact cached LS from default SIDECAR_DATA_ROOT'),
+        },
+        execFn: spyExec,
+        restartDelayMs: 0,
+      });
+      assert.equal(implicitRpcRes.rpcRes.notified, false);
+      assert.deepEqual(execCalls, []);
+      assert.deepEqual(killCalls, []);
+
+      // 2. Passing an explicit rpcOptions.sidecarDataRoot still invokes process restart against that explicit root
+      const explicitRoot = join(dir, 'explicit-sidecar-data');
+      mkdirSync(join(explicitRoot, 'sandbox-victim', 'data'), { recursive: true });
+      writeJsonNoBom(join(explicitRoot, 'sandbox-victim', 'data', 'runtime.json'), {
+        pid: 99999,
+        port: 54321,
+        webPort: 54321,
+      });
+
+      const explicitRes = await runSidecarSetup({
+        sidecarId: 'sandbox-victim',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir: join(dir, 'sidecars'),
+        configJsonPath: join(dir, 'config.json'),
+        packagesDir: join(dir, 'packages'),
+        rpcOptions: {
+          lsAddress: '',
+          csrfToken: '',
+          sidecarDataRoot: explicitRoot,
+          env: fakeEnv,
+          killFn: spyKill,
+        },
+        execFn: spyExec,
+        restartDelayMs: 0,
+      });
+      assert.equal(explicitRes.rpcRes.notified, true);
+      assert.equal(explicitRes.rpcRes.viaProcessRestart, 'pid:99999');
+      assert.ok(execCalls.length > 0, 'expected port probe against explicit sidecarDataRoot');
+      assert.deepEqual(killCalls, [{ pid: 99999, sig: 'SIGTERM' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('regression (I3): sandboxed runSidecarSetup makes 0 HTTP requests to ambient process.env.ANTIGRAVITY_LS_ADDRESS / ANTIGRAVITY_CSRF_TOKEN when rpcOptions is omitted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-sandbox-ambient-ls-'));
+    const prevLsAddr = process.env.ANTIGRAVITY_LS_ADDRESS;
+    const prevCsrf = process.env.ANTIGRAVITY_CSRF_TOKEN;
+    const requests = [];
+    const dummyLs = createHttpServer((req, res) => {
+      requests.push({ method: req.method, url: req.url });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise((resolve) => dummyLs.listen(0, '127.0.0.1', resolve));
+
+    try {
+      const { port } = dummyLs.address();
+      process.env.ANTIGRAVITY_LS_ADDRESS = `127.0.0.1:${port}`;
+      process.env.ANTIGRAVITY_CSRF_TOKEN = 'ambient-live-csrf-token';
+
+      const repoDir = join(dir, 'repo');
+      mkdirSync(repoDir, { recursive: true });
+      writeFileSync(join(repoDir, 'sidecar.json'), '{}', 'utf8');
+      writeFileSync(join(repoDir, 'server.mjs'), '', 'utf8');
+
+      const globalSidecarsDir = join(dir, 'sidecars');
+      const configJsonPath = join(dir, 'config.json');
+      const packagesDir = join(dir, 'packages');
+
+      const installRes = await runSidecarSetup({
+        sidecarId: 'ambient-ls-guard',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+      });
+      assert.equal(installRes.uninstalled, false);
+      assert.equal(installRes.rpcRes.notified, false);
+      assert.equal(requests.length, 0, 'sandboxed install must make 0 HTTP requests to ambient LS');
+
+      const uninstallRes = await runSidecarSetup({
+        sidecarId: 'ambient-ls-guard',
+        repoRoot: repoDir,
+        args: ['--uninstall'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+      });
+      assert.equal(uninstallRes.uninstalled, true);
+      assert.equal(requests.length, 0, 'sandboxed uninstall must make 0 HTTP requests to ambient LS');
+
+      // Explicit rpcOptions.lsAddress + csrfToken still notifies the target server
+      const explicitRes = await runSidecarSetup({
+        sidecarId: 'ambient-ls-guard',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        rpcOptions: {
+          lsAddress: `127.0.0.1:${port}`,
+          csrfToken: 'ambient-live-csrf-token',
+        },
+        restartDelayMs: 0,
+      });
+      assert.equal(explicitRes.rpcRes.notified, true);
+      assert.ok(requests.length >= 1, 'explicit rpcOptions must contact configured LS');
+    } finally {
+      if (prevLsAddr === undefined) delete process.env.ANTIGRAVITY_LS_ADDRESS;
+      else process.env.ANTIGRAVITY_LS_ADDRESS = prevLsAddr;
+      if (prevCsrf === undefined) delete process.env.ANTIGRAVITY_CSRF_TOKEN;
+      else process.env.ANTIGRAVITY_CSRF_TOKEN = prevCsrf;
+      await new Promise((resolve) => dummyLs.close(resolve));
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -792,5 +977,128 @@ describe('antigravity-sidecar-kit/setup, /server, and CLI scaffolder', () => {
         origin: '*',
       },
     ]);
+  });
+
+  it('runSidecarSetup --copy installs an isolated Hangar package snapshot so runtime sidecar.json mutations never dirty the git checkout', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-setup-copy-mode-'));
+    try {
+      const repoDir = join(dir, 'repo');
+      const sc = scaffoldSidecarProject({ name: 'snap-tool', targetDir: repoDir });
+      assert.equal(sc.id, 'snap-tool');
+
+      const pkgPath = join(repoDir, 'package.json');
+      const pkg = readJsonSafe(pkgPath);
+      assert.equal(pkg.scripts['setup:copy'], 'node setup.mjs --copy');
+      pkg.version = '1.2.0';
+      writeJsonNoBom(pkgPath, pkg);
+
+      // Populate dev-only directories and a junctioned node_modules/antigravity-sidecar-kit (file:.. simulation)
+      mkdirSync(join(repoDir, '.git'), { recursive: true });
+      writeFileSync(join(repoDir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
+      mkdirSync(join(repoDir, '.superpowers', 'sdd'), { recursive: true });
+      writeFileSync(join(repoDir, '.superpowers', 'sdd', 'progress.md'), '# scratch\n', 'utf8');
+      mkdirSync(join(repoDir, '.idea'), { recursive: true });
+      writeFileSync(join(repoDir, '.idea', 'workspace.xml'), '<project/>', 'utf8');
+
+      const fakeExternalKit = join(dir, 'fake-kit-target');
+      mkdirSync(fakeExternalKit, { recursive: true });
+      writeJsonNoBom(join(fakeExternalKit, 'package.json'), { name: 'antigravity-sidecar-kit', version: '0.0.1' });
+      mkdirSync(join(repoDir, 'node_modules'), { recursive: true });
+      symlinkSync(
+        fakeExternalKit,
+        join(repoDir, 'node_modules', 'antigravity-sidecar-kit'),
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+
+      const globalSidecarsDir = join(dir, 'sidecars');
+      const configJsonPath = join(dir, 'config.json');
+      const packagesDir = join(dir, 'packages');
+
+      // 1. Default install from local checkout links directly to repoDir
+      const linkRes = await runSidecarSetup({
+        sidecarId: 'snap-tool',
+        repoRoot: repoDir,
+        args: ['--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+      });
+      assert.equal(linkRes.installMode, 'link');
+      assert.equal(linkRes.linkedTo, realpathSync(repoDir));
+
+      // 2. --copy snapshots into packages/snap-tool@1.2.0 and repoints sidecars/snap-tool there
+      const copyRes = await runSidecarSetup({
+        sidecarId: 'snap-tool',
+        repoRoot: repoDir,
+        args: ['--copy', '--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+      });
+      const expectedSnapshotDir = join(packagesDir, 'snap-tool@1.2.0');
+      assert.equal(copyRes.installMode, 'copy');
+      assert.equal(copyRes.linkedTo, realpathSync(expectedSnapshotDir));
+      assert.equal(realpathSync(join(globalSidecarsDir, 'snap-tool')), realpathSync(expectedSnapshotDir));
+      assert.equal(existsSync(join(expectedSnapshotDir, '.git')), false);
+      assert.equal(existsSync(join(expectedSnapshotDir, '.superpowers')), false);
+      assert.equal(existsSync(join(expectedSnapshotDir, '.idea')), false);
+      assert.equal(
+        existsSync(join(expectedSnapshotDir, 'node_modules', 'antigravity-sidecar-kit', 'lib', 'setup.mjs')),
+        true,
+        'symlinked dev kit must be replaced by real bundled kit files'
+      );
+
+      // Simulate Antigravity Language Server writing workspace_uris into sidecars/snap-tool/sidecar.json
+      const activeSidecarJsonPath = join(globalSidecarsDir, 'snap-tool', 'sidecar.json');
+      const mutatedManifest = readJsonSafe(activeSidecarJsonPath);
+      mutatedManifest.agent_permissions = { workspace_uris: ['file:///c:/Users/dev/project'] };
+      writeJsonNoBom(activeSidecarJsonPath, mutatedManifest);
+
+      const repoSidecarJson = readJsonSafe(join(repoDir, 'sidecar.json'));
+      assert.deepEqual(
+        repoSidecarJson.agent_permissions,
+        { workspace_uris: [] },
+        'git checkout sidecar.json must remain clean when installed with --copy'
+      );
+
+      // 3. --link explicitly overrides { copy: true } back to live repo link
+      const relinkRes = await runSidecarSetup({
+        sidecarId: 'snap-tool',
+        repoRoot: repoDir,
+        copy: true,
+        args: ['--link', '--skip-tests'],
+        globalSidecarsDir,
+        configJsonPath,
+        packagesDir,
+        restartDelayMs: 0,
+      });
+      assert.equal(relinkRes.installMode, 'link');
+      assert.equal(relinkRes.linkedTo, realpathSync(repoDir));
+
+      // 4. Edge-case guards: self-copy is a safe no-op and nested packagesDir inside repoRoot throws
+      const selfCopy = resolvePermanentLinkSource(expectedSnapshotDir, {
+        sidecarId: 'snap-tool',
+        version: '1.2.0',
+        packagesDir,
+        copy: true,
+      });
+      assert.equal(selfCopy, realpathSync(expectedSnapshotDir));
+      assert.equal(existsSync(join(expectedSnapshotDir, 'server.mjs')), true);
+
+      assert.throws(
+        () =>
+          resolvePermanentLinkSource(repoDir, {
+            sidecarId: 'snap-tool',
+            version: '1.2.0',
+            packagesDir: join(repoDir, '.nested-packages'),
+            copy: true,
+          }),
+        /packagesDir must not be inside repoRoot/i
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

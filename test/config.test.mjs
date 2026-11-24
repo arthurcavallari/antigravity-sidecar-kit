@@ -4,10 +4,12 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  DEFAULT_MCP_CONFIG_PATH,
   readJsonSafe,
   readJsonFile,
   writeJsonNoBom,
   updateAgySidecarConfig,
+  syncMcpServerConfig,
 } from '../lib/config.mjs';
 
 describe('antigravity-sidecar-kit/config BOM-safe JSON helpers and config.json updater', () => {
@@ -64,6 +66,164 @@ describe('antigravity-sidecar-kit/config BOM-safe JSON helpers and config.json u
       const okCorrupt = updateAgySidecarConfig('hangar', false, cfgPath);
       assert.equal(okCorrupt, false);
       assert.equal(readFileSync(cfgPath, 'utf8'), corruptContent);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('syncMcpServerConfig writes BOM-free mcp_config.json, preserves env, supports uninstall, and throws on malformed JSON', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-mcp-cfg-test-'));
+    try {
+      assert.equal(typeof DEFAULT_MCP_CONFIG_PATH, 'string');
+      assert.ok(DEFAULT_MCP_CONFIG_PATH.endsWith('mcp_config.json'));
+      const barrel = await import('../lib/index.mjs');
+      assert.equal(barrel.syncMcpServerConfig, syncMcpServerConfig);
+      assert.equal(barrel.DEFAULT_MCP_CONFIG_PATH, DEFAULT_MCP_CONFIG_PATH);
+
+      const mcpPath = join(dir, 'mcp_config.json');
+      const rpcCalls = [];
+      const callLsRpcFn = async (method, body, opts) => {
+        rpcCalls.push({ method, body, opts });
+        return { ok: true };
+      };
+
+      // 1. Creates mcp_config.json without BOM, writes entry, and invokes RefreshMcpServers
+      const created = await syncMcpServerConfig({
+        serverName: 'notes-mcp',
+        command: '/usr/bin/node',
+        args: ['/srv/notes/mcp.mjs'],
+        enabled: true,
+        mcpConfigPath: mcpPath,
+        callLsRpcFn,
+        sidecarId: 'notes',
+      });
+      assert.deepEqual(created, { registered: true, enabled: true });
+      const rawBytes = readFileSync(mcpPath);
+      assert.notEqual(rawBytes[0], 0xef);
+      assert.deepEqual(readJsonSafe(mcpPath, {}), {
+        mcpServers: {
+          'notes-mcp': {
+            command: '/usr/bin/node',
+            args: ['/srv/notes/mcp.mjs'],
+            disabled: false,
+          },
+        },
+      });
+      assert.deepEqual(rpcCalls, [
+        { method: 'RefreshMcpServers', body: {}, opts: { sidecarId: 'notes' } },
+      ]);
+
+      // Seed env on notes-mcp + a sibling server, and verify callLsRpcFn rejections are swallowed
+      await syncMcpServerConfig({
+        serverName: 'notes-mcp',
+        command: '/usr/bin/node',
+        args: ['/srv/notes/mcp.mjs'],
+        env: { NOTES_TOKEN: 'keep-secret' },
+        enabled: true,
+        mcpConfigPath: mcpPath,
+        callLsRpcFn: async () => {
+          throw new Error('Language Server offline');
+        },
+        sidecarId: 'notes',
+      });
+      await syncMcpServerConfig({
+        serverName: 'sibling-mcp',
+        command: 'npx',
+        args: ['sibling-server'],
+        mcpConfigPath: mcpPath,
+      });
+
+      // 2. Preserves existing env when env is omitted, and deletes only target server on uninstall
+      const updated = await syncMcpServerConfig({
+        serverName: 'notes-mcp',
+        command: '/opt/node22/bin/node',
+        args: ['/srv/notes-v2/mcp.mjs'],
+        enabled: false,
+        mcpConfigPath: mcpPath,
+      });
+      assert.deepEqual(updated, { registered: true, enabled: false });
+      assert.deepEqual(readJsonSafe(mcpPath, {}), {
+        mcpServers: {
+          'notes-mcp': {
+            command: '/opt/node22/bin/node',
+            args: ['/srv/notes-v2/mcp.mjs'],
+            disabled: true,
+            env: { NOTES_TOKEN: 'keep-secret' },
+          },
+          'sibling-mcp': {
+            command: 'npx',
+            args: ['sibling-server'],
+            disabled: false,
+          },
+        },
+      });
+
+      const uninstalled = await syncMcpServerConfig({
+        serverName: 'notes-mcp',
+        uninstall: true,
+        mcpConfigPath: mcpPath,
+        callLsRpcFn,
+        sidecarId: 'notes',
+      });
+      assert.deepEqual(uninstalled, { registered: false, enabled: false });
+      assert.deepEqual(readJsonSafe(mcpPath, {}), {
+        mcpServers: {
+          'sibling-mcp': {
+            command: 'npx',
+            args: ['sibling-server'],
+            disabled: false,
+          },
+        },
+      });
+
+      // 3. Throws without modifying disk when existing mcp_config.json contains malformed JSON
+      const corruptMcp = '{ "mcpServers": { "broken": ';
+      writeFileSync(mcpPath, corruptMcp, 'utf8');
+      await assert.rejects(
+        () =>
+          syncMcpServerConfig({
+            serverName: 'notes-mcp',
+            mcpConfigPath: mcpPath,
+          }),
+        SyntaxError
+      );
+      assert.equal(readFileSync(mcpPath, 'utf8'), corruptMcp);
+
+      await assert.rejects(
+        () =>
+          syncMcpServerConfig({
+            serverName: 'sibling-mcp',
+            uninstall: true,
+            mcpConfigPath: mcpPath,
+          }),
+        SyntaxError
+      );
+      assert.equal(readFileSync(mcpPath, 'utf8'), corruptMcp);
+
+      // 4. Rejects non-plain-object JSON roots ([], null, primitives) and invalid mcpServers on both install and uninstall without modifying disk
+      for (const nonObjectPayload of ['[]', 'null', '"corrupt"', '42', '{"mcpServers":[]}', '{"mcpServers":null}']) {
+        writeFileSync(mcpPath, nonObjectPayload, 'utf8');
+        await assert.rejects(
+          () =>
+            syncMcpServerConfig({
+              serverName: 'notes-mcp',
+              mcpConfigPath: mcpPath,
+            }),
+          /Invalid (JSON|mcpServers) object/
+        );
+        assert.equal(readFileSync(mcpPath, 'utf8'), nonObjectPayload);
+
+        await assert.rejects(
+          () =>
+            syncMcpServerConfig({
+              serverName: 'notes-mcp',
+              uninstall: true,
+              mcpConfigPath: mcpPath,
+            }),
+          /Invalid (JSON|mcpServers) object/
+        );
+        assert.equal(readFileSync(mcpPath, 'utf8'), nonObjectPayload);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

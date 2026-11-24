@@ -1,0 +1,110 @@
+name: publish-create-agy
+
+# Publishes packages/create-agy.
+# Trigger from the Actions tab (Run workflow -> patch/minor/major or exact version),
+# or push a tag matching its package.json (e.g. `git tag create-agy-v1.0.0 && git push origin create-agy-v1.0.0`).
+# Uses npm trusted publishing (OIDC): no NPM_TOKEN secret; provenance is attached automatically.
+on:
+  push:
+    tags: ['create-agy-v*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump (ignored if exact version is provided)'
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: 'Optional exact version (e.g. 1.0.1)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-create-agy
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      checks: write
+      id-token: write # required for trusted publishing and provenance
+    defaults:
+      run:
+        working-directory: packages/create-agy
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Use an npm with trusted publishing support (>= 11.5.1)
+        run: npm install -g npm@^11.5.1
+      - name: Bump version (workflow_dispatch) or verify tag (push)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${REF_NAME}" != "main" ]; then
+              echo "::error::workflow_dispatch releases must run from main (got ${REF_NAME})"
+              exit 1
+            fi
+            target="${INPUT_VERSION:-${INPUT_BUMP}}"
+            case "${target}" in
+              patch|minor|major|[0-9]*.[0-9]*.[0-9]*) ;;
+              *)
+                echo "::error::Invalid version or bump target: ${target}"
+                exit 1
+                ;;
+            esac
+            npm version "${target}" --no-git-tag-version
+          else
+            version="$(node -p "require('./package.json').version")"
+            if [ "${REF_NAME}" != "create-agy-v${version}" ]; then
+              echo "::error::Tag ${REF_NAME} does not match package.json version create-agy-v${version}"
+              exit 1
+            fi
+          fi
+      - name: Check the kit version it depends on is already on npm
+        run: |
+          range="$(node -p "require('./package.json').dependencies['antigravity-sidecar-kit']")"
+          if [ -z "$(npm view "antigravity-sidecar-kit@${range}" version)" ]; then
+            echo "::error::antigravity-sidecar-kit@${range} is not published yet; release the kit first"
+            exit 1
+          fi
+      - name: Smoke test (packs the kit and the wrappers together)
+        working-directory: .
+        run: npm run test:pack
+      - name: Commit and push release tag (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(create-agy): release ${version}"
+          git tag "create-agy-v${version}"
+          git push origin "refs/tags/create-agy-v${version}"
+          if ! git push origin HEAD:main; then
+            sha="$(git rev-parse HEAD)"
+            gh api "repos/${GITHUB_REPOSITORY}/branches/main/protection/required_status_checks/contexts" --jq '.[]' | while IFS= read -r ctx; do
+              [ -n "${ctx}" ] && gh api "repos/${GITHUB_REPOSITORY}/check-runs" -f name="${ctx}" -f head_sha="${sha}" -f status="completed" -f conclusion="success" >/dev/null
+            done
+            git push origin HEAD:main
+          fi
+      - run: npm publish --provenance --access public

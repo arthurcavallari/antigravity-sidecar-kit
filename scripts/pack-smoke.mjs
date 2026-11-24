@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * @fileoverview Packs the kit, installs the tarball into an empty project, and exercises
- * the published surface (bins via npx, every exports subpath, shipped file list).
+ * the published surface (bins via npx, sidecar + plugin archetypes, build-plugin, every exports subpath, shipped file list).
  * Unit tests import lib/ directly and cannot catch packaging mistakes; this does.
  */
 
@@ -20,24 +20,51 @@ const run = (cmd, cwd) =>
   execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
 
 try {
-  const [{ filename }] = JSON.parse(run(`npm pack --json --pack-destination "${work}"`, ROOT));
+  const [{ filename }] = JSON.parse(
+    run(`npm pack --ignore-scripts --json --pack-destination "${work}"`, ROOT)
+  );
   const app = join(work, 'app');
   mkdirSync(app);
-  writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'smoke', private: true, type: 'module' }));
-  run(`npm install --no-audit --no-fund "${join(work, filename)}"`, app);
+  writeFileSync(
+    join(app, 'package.json'),
+    JSON.stringify({ name: 'smoke', private: true, type: 'module' })
+  );
+  run(`npm install --ignore-scripts --no-audit --no-fund "${join(work, filename)}"`, app);
 
   const installed = join(app, 'node_modules', pkg.name);
   assert.equal(existsSync(join(installed, 'test')), false, 'test/ must not be published');
 
-  // Every bin resolves (npx == npm exec), including the one named after the package
+  // Every bin resolves (npx == npm exec), including create-agy and agy-kit
   for (const bin of Object.keys(pkg.bin)) {
-    assert.match(run(`npm exec --no -- ${bin} --help`, app), /init <sidecar-name>/, `npx ${bin} --help`);
+    assert.match(
+      run(`npm exec --no -- ${bin} --help`, app),
+      /init <sidecar-name>/,
+      `npx ${bin} --help`
+    );
   }
 
-  run(`npm exec --no -- ${pkg.name} init demo --dir demo`, app);
-  for (const rel of ['package.json', 'sidecar.json', 'hub-manifest.json', 'server.mjs', 'setup.mjs', 'ui/index.html']) {
+  run(`npm exec --no -- ${pkg.name} init demo --dir demo -y`, app);
+  for (const rel of [
+    'package.json',
+    'sidecar.json',
+    'hub-manifest.json',
+    'server.mjs',
+    'setup.mjs',
+    'ui/index.html',
+  ]) {
     assert.equal(existsSync(join(app, 'demo', rel)), true, `scaffolded ${rel}`);
   }
+
+  // Exercise plugin archetype + build-plugin from the installed tarball (verifies workflow assets & lib/cli/*)
+  run(
+    'npm exec --no -- agy-kit init demo-plug --archetype plugin --components skills,mcp --github octocat --dir demo-plug -y',
+    app
+  );
+  const builtJson = JSON.parse(
+    run('npm exec --no -- agy-kit build-plugin --dir demo-plug --no-agy-validate --json', app)
+  );
+  assert.equal(builtJson.pluginName, 'agy-demo-plug');
+  assert.equal(existsSync(builtJson.tarball), true, 'packed kit builds plugin tarball');
 
   // Every exports subpath loads from the installed package
   // ./cli is an entrypoint: importing it runs the CLI, so it is exercised through the bins instead
@@ -52,7 +79,7 @@ try {
     app
   );
 
-  console.log(`[pack-smoke] ${filename}: bins, scaffold, and ${importable.length} exports OK`);
+  console.log(`[pack-smoke] ${filename}: bins, archetypes, and ${importable.length} exports OK`);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

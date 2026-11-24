@@ -9,36 +9,52 @@
   <a href="https://github.com/sponsors/arthurcavallari"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub" height="20"></a>
 </p>
 
-> Zero-dependency SDK and CLI project scaffolder for **Google Antigravity** Auxiliary Pane sidecars.
+> Zero-dependency SDK, archetype scaffolder, and packaging CLI for **Google Antigravity** Auxiliary Pane sidecars and native plugins.
 
 Google Antigravity's built-in `sidecar_sdk` provides a minimal `SidecarApp` loopback HTTP server, leaving every sidecar author to re-implement Language Server Connect RPC clients, CSRF credential caching, host theme seed & contrast resolution, `/compiled_tailwind.css` `@layer` proxying, UTF-8 BOM-safe `~/.gemini/config/config.json` mutation, and `_npx`-safe NTFS junction/symlink installation.
 
-`antigravity-sidecar-kit` packages that entire infrastructure layer into a **zero-dependency**, pure Node.js (`>= 20.0.0`) ESM toolkit used by [**Antigravity Hangar**](https://github.com/arthurcavallari/antigravity-hangar) and [**Antigravity Context Monitor**](https://github.com/arthurcavallari/antigravity-context-monitor).
+`antigravity-sidecar-kit` packages that entire infrastructure layer—plus 4 project archetypes, manifest linting, `.tgz` plugin bundling, offline tarball smoke verification, and Hangar registry tooling—into a **zero-dependency**, pure Node.js (`>= 20.0.0`) ESM toolkit used by [**Antigravity Hangar**](https://github.com/arthurcavallari/antigravity-hangar) and [**Antigravity Context Monitor**](https://github.com/arthurcavallari/antigravity-context-monitor).
 
 ---
 
-## 1. Quick Start: Scaffold a New Sidecar
+## 1. Quick Start: Scaffold a Sidecar or Native Plugin
 
-Generate a complete, Hangar-compatible Antigravity Auxiliary Pane sidecar in one command:
+Launch the interactive wizard via [`create-agy`](https://www.npmjs.com/package/create-agy) or pass flags directly:
 
 ```bash
+# Interactive TTY wizard (select archetype, UI entrypoint, or plugin components)
+npm create agy
+
+# Standalone Auxiliary Pane webview sidecar (default archetype: sidecar-ui)
 npm create antigravity-sidecar my-sidecar
-cd antigravity-my-sidecar
-npm install
-npm run setup
+cd antigravity-my-sidecar && npm install && npm run setup
+
+# Native Antigravity plugin bundle (skills, mcp, rules, hooks, agents)
+npm create agy my-plugin -- --archetype plugin --components skills,mcp,hooks --github octocat -y
+cd agy-my-plugin && npm install && npm run build:plugin
+agy plugin install ./dist/plugin/agy-my-plugin
 ```
 
-Options: `--dir <target-dir>` to choose the output folder, `--entrypoint <aux_pane|sidebar|full_pane>` to mount in the Auxiliary Pane (default) or left-sidebar Extensions section (`SIDECAR_UI_ENTRYPOINT_SIDEBAR`), `--hide-title-bar` to set `title_bar_style: "SIDECAR_UI_TITLE_BAR_STYLE_HIDDEN"` on standalone views, and `--force` to overwrite an existing scaffold.
+`npm create agy` runs [`create-agy`](https://www.npmjs.com/package/create-agy); `npm create antigravity-sidecar` runs [`create-antigravity-sidecar`](https://www.npmjs.com/package/create-antigravity-sidecar). Both delegate to `antigravity-sidecar-kit/cli` (`npx antigravity-sidecar-kit`).
 
-`npm create antigravity-sidecar` runs the [`create-antigravity-sidecar`](https://www.npmjs.com/package/create-antigravity-sidecar) launcher. `npx antigravity-sidecar-kit init my-sidecar` does the same thing.
+### Archetypes
 
-What gets generated:
-- `package.json` — ESM configuration with `setup`, `start`, `uninstall`, and `test` scripts.
-- `sidecar.json` — Antigravity `SidecarManager` manifest (`SIDECAR_UI_ENTRYPOINT_AUX_PANE`).
-- `hub-manifest.json` — Hangar Marketplace metadata (`capabilityTier`, `workspaceTriggers`, categories).
-- `server.mjs` — Thin `SidecarApp` entrypoint serving `/compiled_tailwind.css` and token-authenticated UI assets.
-- `setup.mjs` — Cross-platform installer (`runSidecarSetup`) with `--uninstall` and `--skip-tests` support.
-- `ui/` & `test/` — Theme-adaptive UI shell and automated smoke tests.
+| Archetype | Default Folder / ID | Generated Surface | Install Flow |
+| :--- | :--- | :--- | :--- |
+| `sidecar-ui` | `antigravity-<id>` | Standalone `sidecar.json`, `hub-manifest.json`, `launch.mjs`, `server.mjs`, `setup.mjs`, `ui/`, CI workflows | `npm run setup` (`npx <pkg>`) |
+| `sidecar-mcp` | `antigravity-<id>` | `sidecar-ui` + `mcp.mjs` (`startStdioMcpBridge` synced with sidecar state) | `npm run setup` (`--no-mcp` optional) |
+| `plugin` | `agy-<id>` | `plugin/plugin.json` + selected `--components` (`skills`, `mcp`, `rules`, `hooks`, `agents`) + release CI | `npm run build:plugin` + `agy plugin install` |
+| `plugin-sidecar` | `agy-<id>` | `plugin/plugin.json` + companion `plugin/sidecars/<id>/` + optional plugin components + bundled kit | `npm run build:plugin` + `agy plugin install` |
+
+### CLI Subcommands
+
+Standalone `npx` invocations outside an installed project must use `npx antigravity-sidecar-kit <subcommand>` (or `npx create-agy` for scaffolding); `agy-sidecar-kit` and `agy-kit` are local `node_modules/.bin` shims available inside installed projects and `npm run` scripts.
+
+- `init <name> [--archetype <sidecar-ui|sidecar-mcp|plugin|plugin-sidecar>] [--components <skills,mcp,rules,hooks,agents>] [--entrypoint <aux_pane|sidebar|full_pane>] [--hide-title-bar] [-d|--dir <target-dir>] [--pkg-name <name>] [--title <title>] [--description <text>] [--author <name>] [--github <owner>] [--no-ci] [--yes|-y] [--force|-f]` — Scaffold a new project interactively or headlessly.
+- `lint [--fix] [--json] [--strict] [--dir <dir>] [dir]` — Validate `sidecar.json`, `plugin.json`, `mcp_config.json`, `hooks.json`, skills, and rules (with auto-fixes for known migration defects).
+- `build-plugin [--dir <dir>] [--out <out-dir>] [--no-tar] [--no-agy-validate] [--json] [dir]` — Assemble `dist/plugin/<pluginName>`, bundle `antigravity-sidecar-kit` when needed, run strict lint + `agy plugin validate --strict` (`agy >= 1.5.13`), and emit `<pluginName>-plugin-<version>.tgz` + `.sha256`.
+- `pack-smoke [--dir <dir>] [--json] [dir]` — Offline tarball smoke test verifying `npm pack` + isolated `setup.mjs` lifecycle for sidecars and `.tgz` extraction + strict lint for plugins without touching `~/.gemini/config`.
+- `registry-entry [--dir <dir>] [--sha256 <hex>] [--write <registry.json>] [--pr] [--hangar-repo <owner/repo>] [--no-agy-validate] [--json] [dir]` — Infer Hangar capability tier (`TIER_1_TELEMETRY`..`TIER_3_AGENT_CONTROL`), generate/upsert a validated Hangar `registry.json` entry (using `--sha256 <hex>`, an existing `<outDir>/*.tgz.sha256`, or building `.tgz` if missing), or open an automated PR via `gh`.
 
 ---
 
@@ -253,13 +269,13 @@ await runSidecarSetup({
 });
 ```
 
-Command-line flags read from `args` (default `process.argv`): `--skip-tests`, `--uninstall`, and `--force`.
+Command-line flags read from `args` (default `process.argv`): `--copy`, `--link`, `--skip-tests`, `--uninstall`, and `--force` (plus programmatic `{ copy: true }`).
 
 What `runSidecarSetup` handles automatically:
 1. Verifies Node.js `>= 20.0.0` and all `requiredFiles`.
 2. Refuses to continue if `~/.gemini/config/sidecars/<id>` is a real directory (an in-place checkout) rather than a link, unless setup is running from inside that directory or `--force` is passed. Nothing is run, copied, or deleted before this check.
 3. Runs `testFiles` via `node --test` unless `--skip-tests` is passed.
-4. **Ephemeral `_npx` Copy & SDK Bundling (`resolvePermanentLinkSource`)**: When executed via `npx`, copies the package out of the temporary `_npx` cache into `~/.gemini/hangar/packages/<id>@<version>` and guarantees `node_modules/antigravity-sidecar-kit` is present inside the permanent copy whether npm nested or hoisted the dependency. **Only `antigravity-sidecar-kit` is carried over**: sidecars installed this way must have no other runtime dependencies, and setup warns if `package.json` lists any.
+4. **Snapshot Copy vs. Live Checkout Link (`resolvePermanentLinkSource`)**: When executed via `npx` — or from a local checkout with `--copy` (`npm run setup -- --copy` / `npm run setup:copy`) — copies the package into `~/.gemini/antigravity/hangar/packages/<id>@<version>` (excluding `.git`, `.superpowers`, `.idea`, `.vscode`) and guarantees real `node_modules/antigravity-sidecar-kit` files are bundled inside the snapshot. Using `--copy` decouples the running sidecar from your git working tree so Antigravity's runtime `sidecar.json` `workspace_uris` updates never dirty `git status`. Without `--copy` (or when `--link` is passed), local checkouts link directly to the working tree for live development. **Only `antigravity-sidecar-kit` is carried over in snapshot copies**: sidecars installed this way must have no other runtime dependencies, and setup warns if `package.json` lists any.
 5. Links `~/.gemini/config/sidecars/<id>` using an NTFS directory junction on Windows or symlink on macOS/Linux.
 6. Enables `sidecars[id].enabled = true` in `~/.gemini/config/config.json` (preserving `projectId`, written atomically via temp file + rename).
 7. Hot-reloads the sidecar via `ManageSidecar` RPC (`SIDECAR_ACTION_RESTART` $\rightarrow$ `SIDECAR_ACTION_ENABLE`) or `killSidecarProcessByPortOrPid` fallback.
@@ -325,9 +341,9 @@ This is a stopgap: remove it once Antigravity's language server stops its own si
 ```text
 antigravity-sidecar-kit/
 ├── package.json
-├── .github/workflows/test.yml  # CI: Linux, macOS, Windows × Node 20/22/24
+├── .github/workflows/          # test.yml, publish.yml, publish-create.yml, publish-create-agy.yml
 ├── bin/
-│   └── cli.mjs                 # CLI scaffolder (agy-sidecar-kit / create-antigravity-sidecar)
+│   └── cli.mjs                 # CLI router (antigravity-sidecar-kit / agy-kit / create-agy / create-antigravity-sidecar)
 ├── lib/
 │   ├── index.mjs               # Barrel export
 │   ├── config.mjs              # OS paths, BOM-safe JSON & config.json updater
@@ -337,17 +353,14 @@ antigravity-sidecar-kit/
 │   ├── server.mjs              # SidecarApp asset & stylesheet route factories
 │   ├── workspace.mjs           # Workspace URI normalizer, glob matcher & trajectory resolver
 │   ├── lifecycle.mjs           # Exits an orphaned sidecar once the language server is gone
-│   └── scaffolder.mjs          # Project template generator
+│   ├── manifest-validator.mjs  # Schema validator & migration defect linter
+│   ├── scaffolder.mjs          # Multi-archetype project generator
+│   ├── scaffolder/             # Naming, base/CI layer, sidecar & plugin layer builders
+│   └── cli/                    # Interactive TTY prompts, build-plugin, pack-smoke & registry-entry
 ├── packages/
+│   ├── create-agy/                   # `npm create agy` launcher (published separately)
 │   └── create-antigravity-sidecar/   # `npm create antigravity-sidecar` launcher (published separately)
-└── test/
-    ├── cli.test.mjs
-    ├── config.test.mjs
-    ├── rpc.test.mjs
-    ├── theme.test.mjs
-    ├── setup-server.test.mjs
-    ├── workspace.test.mjs
-    └── lifecycle.test.mjs
+└── test/                       # node:test suites covering runtime modules, archetypes & CLI
 ```
 
 ---

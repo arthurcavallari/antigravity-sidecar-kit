@@ -1,7 +1,17 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,23 +21,57 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(ROOT, 'bin', 'cli.mjs');
 
 describe('antigravity-sidecar-kit CLI', () => {
-  it('exposes a bin named after the package so `npx antigravity-sidecar-kit` resolves', () => {
+  it('exposes all CLI bins and syncs both create-* wrapper packages to the kit version', () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
     assert.equal(pkg.bin[pkg.name], 'bin/cli.mjs');
-    const wrapperPkg = JSON.parse(
+    assert.equal(pkg.bin['create-antigravity-sidecar'], 'bin/cli.mjs');
+    assert.equal(pkg.bin['create-agy'], 'bin/cli.mjs');
+    assert.equal(pkg.bin['agy-sidecar-kit'], 'bin/cli.mjs');
+    assert.equal(pkg.bin['agy-kit'], 'bin/cli.mjs');
+
+    const sidecarWrapperPkg = JSON.parse(
       readFileSync(join(ROOT, 'packages', 'create-antigravity-sidecar', 'package.json'), 'utf8')
     );
-    assert.equal(wrapperPkg.dependencies['antigravity-sidecar-kit'], `^${pkg.version}`);
+    assert.equal(sidecarWrapperPkg.dependencies['antigravity-sidecar-kit'], `^${pkg.version}`);
+
+    const createAgyDir = join(ROOT, 'packages', 'create-agy');
+    const createAgyPkg = JSON.parse(readFileSync(join(createAgyDir, 'package.json'), 'utf8'));
+    assert.equal(createAgyPkg.name, 'create-agy');
+    assert.equal(createAgyPkg.bin['create-agy'], 'bin/cli.mjs');
+    assert.equal(createAgyPkg.dependencies['antigravity-sidecar-kit'], `^${pkg.version}`);
+    assert.equal(existsSync(join(createAgyDir, 'bin', 'cli.mjs')), true);
+    assert.equal(existsSync(join(createAgyDir, 'README.md')), true);
+    assert.equal(existsSync(join(createAgyDir, 'LICENSE')), true);
+    assert.equal(existsSync(join(ROOT, '.github', 'workflows', 'publish-create-agy.yml')), true);
+
+    const publishYml = readFileSync(join(ROOT, '.github', 'workflows', 'publish.yml'), 'utf8');
+    assert.match(publishYml, /packages\/create-antigravity-sidecar\/package\.json/);
+    assert.match(publishYml, /packages\/create-agy\/package\.json/);
+
     assert.equal(existsSync(join(ROOT, 'package-lock.json')), true);
+    const lock = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8'));
+    assert.deepEqual(lock.packages[''].bin, pkg.bin);
   });
 
-  it('prints usage and exits 0 for --help, exits 1 without a name', () => {
+  it('prints usage with all 4 archetypes and 5 subcommands for --help, exits 1 with USAGE without a name', () => {
     const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
     assert.equal(help.status, 0);
     assert.match(help.stdout, /npx antigravity-sidecar-kit init/);
+    assert.match(help.stdout, /init <sidecar-name>/);
+    assert.match(help.stdout, /-d, --dir <path>/);
+    assert.match(help.stdout, /--sha256 <64-hex>/);
+    for (const archetype of ['sidecar-ui', 'sidecar-mcp', 'plugin', 'plugin-sidecar']) {
+      assert.match(help.stdout, new RegExp(`\\b${archetype}\\b`), `help mentions ${archetype}`);
+    }
+    for (const subcmd of ['init', 'lint', 'pack-smoke', 'build-plugin', 'registry-entry']) {
+      assert.match(help.stdout, new RegExp(`\\b${subcmd}\\b`), `help mentions ${subcmd}`);
+    }
 
     const missing = spawnSync(process.execPath, [CLI, 'init'], { encoding: 'utf8' });
     assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /project name is required/i);
+    assert.match(missing.stderr, /Usage:/);
+    assert.match(missing.stderr, /npx antigravity-sidecar-kit init <sidecar-name>/);
   });
 
   it('scaffolds a project into --dir and prints next steps', () => {
@@ -45,10 +89,11 @@ describe('antigravity-sidecar-kit CLI', () => {
       const generatedPkg = JSON.parse(readFileSync(join(outDir, 'package.json'), 'utf8'));
       assert.equal(generatedPkg.dependencies['antigravity-sidecar-kit'], `^${kitPkg.version}`);
       const generatedServer = readFileSync(join(outDir, 'server.mjs'), 'utf8');
-      assert.match(generatedServer, /import \{ SidecarApp, Response \} from 'sidecar_sdk'/);
-      assert.match(generatedServer, /createAgyCssHandler\(\{ ResponseClass: Response \}\)/);
-      assert.match(generatedServer, /import \{ exitWithLanguageServer \} from 'antigravity-sidecar-kit\/lifecycle'/);
-      assert.match(generatedServer, /await app\.run\(\);\n[^\n]*\nexitWithLanguageServer\(\{ app \}\);/);
+      assert.doesNotMatch(generatedServer, /import \{ SidecarApp, Response \} from 'sidecar_sdk'/);
+      assert.match(generatedServer, /await import\('sidecar_sdk'\)\.catch\(\(\) => null\)/);
+      assert.match(generatedServer, /createSidecarApp/);
+      assert.match(generatedServer, /setupSidecarServer/);
+      assert.match(generatedServer, /exitWithLanguageServer/);
 
       const again = spawnSync(process.execPath, [CLI, 'init', 'demo', '--dir', outDir], { encoding: 'utf8' });
       assert.equal(again.status, 1, 'refuses to overwrite without --force');
@@ -85,6 +130,18 @@ describe('antigravity-sidecar-kit CLI', () => {
         { encoding: 'utf8' }
       );
       assert.equal(emptyEp.status, 1);
+
+      const shortDirOut = join(dir, 'short-d-demo');
+      execFileSync(process.execPath, [CLI, 'init', 'short-d', '-d', shortDirOut], {
+        encoding: 'utf8',
+      });
+      assert.equal(existsSync(join(shortDirOut, 'sidecar.json')), true);
+
+      const shortDirEqOut = join(dir, 'short-d-eq-demo');
+      execFileSync(process.execPath, [CLI, 'init', 'short-d-eq', `-d=${shortDirEqOut}`], {
+        encoding: 'utf8',
+      });
+      assert.equal(existsSync(join(shortDirEqOut, 'sidecar.json')), true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -122,5 +179,218 @@ describe('antigravity-sidecar-kit CLI', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('wires init (archetype plugin), lint, build-plugin, pack-smoke, and registry-entry end-to-end', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-cli-e2e-'));
+    try {
+      const plugDir = join(dir, 'my-plug');
+      const initRun = spawnSync(
+        process.execPath,
+        [
+          CLI,
+          'init',
+          'my-plug',
+          '--archetype',
+          'plugin',
+          '--components',
+          'skills,mcp,hooks',
+          '--github',
+          'octocat',
+          '--dir',
+          plugDir,
+          '-y',
+        ],
+        { encoding: 'utf8' }
+      );
+      assert.equal(initRun.status, 0, initRun.stderr || initRun.stdout);
+      for (const rel of [
+        'package.json',
+        'plugin/plugin.json',
+        'plugin/skills/my-plug/SKILL.md',
+        'plugin/mcp_config.json',
+        'plugin/mcp/server.mjs',
+        'plugin/hooks.json',
+        'plugin/scripts/session-start.mjs',
+      ]) {
+        assert.equal(existsSync(join(plugDir, rel)), true, `expected ${rel}`);
+      }
+
+      // Repo-root lint inspects nested plugin/ directory automatically
+      const rootLint = spawnSync(
+        process.execPath,
+        [CLI, 'lint', '--strict', '--json', '--dir', plugDir],
+        { encoding: 'utf8' }
+      );
+      assert.equal(rootLint.status, 0, rootLint.stderr || rootLint.stdout);
+      assert.equal(JSON.parse(rootLint.stdout).valid, true);
+
+      // build-plugin --dir <tmp> --json
+      const buildRun = spawnSync(
+        process.execPath,
+        [CLI, 'build-plugin', '--dir', plugDir, '--json'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(buildRun.status, 0, buildRun.stderr || buildRun.stdout);
+      const built = JSON.parse(buildRun.stdout);
+      assert.equal(built.pluginName, 'agy-my-plug');
+      assert.equal(typeof built.tarball, 'string');
+      assert.equal(existsSync(built.tarball), true);
+      assert.match(built.sha256, /^[0-9a-f]{64}$/);
+      assert.equal(
+        built.sha256,
+        createHash('sha256').update(readFileSync(built.tarball)).digest('hex')
+      );
+
+      // registry-entry --dir <tmp> --write <tmpRegistry> creates then updates packages[0]
+      const tmpRegistry = join(dir, 'registry.json');
+      const regCreate = spawnSync(
+        process.execPath,
+        [CLI, 'registry-entry', '--dir', plugDir, '--write', tmpRegistry],
+        { encoding: 'utf8' }
+      );
+      assert.equal(regCreate.status, 0, regCreate.stderr || regCreate.stdout);
+      const regAfterCreate = JSON.parse(readFileSync(tmpRegistry, 'utf8'));
+      assert.equal(regAfterCreate.packages.length, 1);
+      assert.equal(regAfterCreate.packages[0].id, 'agy-my-plug');
+      assert.equal(regAfterCreate.packages[0].kind, 'plugin');
+      assert.equal(
+        regAfterCreate.packages[0].release.sha256,
+        createHash('sha256').update(readFileSync(built.tarball)).digest('hex')
+      );
+
+      const regUpdate = spawnSync(
+        process.execPath,
+        [CLI, 'registry-entry', '--dir', plugDir, '--write', tmpRegistry],
+        { encoding: 'utf8' }
+      );
+      assert.equal(regUpdate.status, 0, regUpdate.stderr || regUpdate.stdout);
+      const regAfterUpdate = JSON.parse(readFileSync(tmpRegistry, 'utf8'));
+      assert.equal(regAfterUpdate.packages.length, 1);
+      assert.equal(regAfterUpdate.packages[0].id, 'agy-my-plug');
+
+      // pack-smoke --dir <tmp> --json
+      const smokeRun = spawnSync(
+        process.execPath,
+        [CLI, 'pack-smoke', '--dir', plugDir, '--json'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(smokeRun.status, 0, smokeRun.stderr || smokeRun.stdout);
+      const smokeJson = JSON.parse(smokeRun.stdout);
+      assert.equal(smokeJson.npmTarball, null);
+      assert.equal(typeof smokeJson.pluginTarball, 'string');
+
+      // Launcher-style default init (no `init` keyword, as invoked by `npm create agy <name> ...`)
+      const directDir = join(dir, 'direct-plug');
+      const directInit = spawnSync(
+        process.execPath,
+        [CLI, 'direct-plug', '--archetype', 'plugin', '--dir', directDir, '-y'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(directInit.status, 0, directInit.stderr || directInit.stdout);
+      assert.equal(existsSync(join(directDir, 'plugin', 'plugin.json')), true);
+
+      // registry-entry --sha256 <64-hex> overrides sha256 without clobbering dist/plugin, and rejects malformed --sha256
+      const explicitSha = '1234567890abcdef'.repeat(4);
+      const regShaOverride = spawnSync(
+        process.execPath,
+        [
+          CLI,
+          'registry-entry',
+          '--dir',
+          plugDir,
+          '--sha256',
+          explicitSha.toUpperCase(),
+          '--no-agy-validate',
+        ],
+        { encoding: 'utf8' }
+      );
+      assert.equal(regShaOverride.status, 0, regShaOverride.stderr || regShaOverride.stdout);
+      assert.equal(JSON.parse(regShaOverride.stdout).release.sha256, explicitSha);
+
+      const badRegSha = spawnSync(
+        process.execPath,
+        [CLI, 'registry-entry', '--dir', plugDir, '--sha256', 'not-64-hex'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(badRegSha.status, 1);
+      assert.match(badRegSha.stderr, /sha256/i);
+
+      // Repo-root lint honors package.json#agyPlugin.pluginDir ("src/plugin") and rejects invalid/escaping/symlink pluginDir
+      const customPlugRepo = join(dir, 'custom-plugin-dir-repo');
+      mkdirSync(join(customPlugRepo, 'src'), { recursive: true });
+      cpSync(join(plugDir, 'plugin'), join(customPlugRepo, 'src', 'plugin'), { recursive: true });
+      const customPkg = JSON.parse(readFileSync(join(plugDir, 'package.json'), 'utf8'));
+      customPkg.agyPlugin = { ...customPkg.agyPlugin, pluginDir: 'src/plugin' };
+      writeFileSync(join(customPlugRepo, 'package.json'), JSON.stringify(customPkg, null, 2));
+
+      const customLintOk = spawnSync(
+        process.execPath,
+        [CLI, 'lint', customPlugRepo, '--strict', '--json'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(customLintOk.status, 0, customLintOk.stderr || customLintOk.stdout);
+      assert.equal(JSON.parse(customLintOk.stdout).valid, true);
+
+      // Introduce a lint defect inside src/plugin/mcp_config.json -> repo-root lint must catch it under src/plugin/
+      const origMcp = readFileSync(join(customPlugRepo, 'src', 'plugin', 'mcp_config.json'), 'utf8');
+      writeFileSync(
+        join(customPlugRepo, 'src', 'plugin', 'mcp_config.json'),
+        JSON.stringify({ mcpServers: { figma: { url: 'https://mcp.figma.com/mcp' } } }, null, 2)
+      );
+      const customLintFail = spawnSync(
+        process.execPath,
+        [CLI, 'lint', customPlugRepo, '--strict', '--json'],
+        { encoding: 'utf8' }
+      );
+      assert.equal(customLintFail.status, 1);
+      const customLintFailBody = JSON.parse(customLintFail.stdout);
+      assert.equal(customLintFailBody.valid, false);
+      assert.ok(customLintFailBody.errors.some((e) => e.file.startsWith('src/plugin/')));
+      writeFileSync(join(customPlugRepo, 'src', 'plugin', 'mcp_config.json'), origMcp);
+
+      // Escaping agyPlugin.pluginDir fails with exit 1
+      writeFileSync(
+        join(customPlugRepo, 'package.json'),
+        JSON.stringify({ ...customPkg, agyPlugin: { pluginDir: '../outside' } }, null, 2)
+      );
+      const escapeLint = spawnSync(process.execPath, [CLI, 'lint', customPlugRepo, '--strict'], {
+        encoding: 'utf8',
+      });
+      assert.equal(escapeLint.status, 1);
+
+      // Symlinked agyPlugin.pluginDir fails with exit 1
+      const linkTarget = join(customPlugRepo, 'src', 'plugin');
+      const linkDir = join(customPlugRepo, 'linked-plugin');
+      symlinkSync(linkTarget, linkDir, process.platform === 'win32' ? 'junction' : 'dir');
+      writeFileSync(
+        join(customPlugRepo, 'package.json'),
+        JSON.stringify({ ...customPkg, agyPlugin: { pluginDir: 'linked-plugin' } }, null, 2)
+      );
+      const symlinkLint = spawnSync(process.execPath, [CLI, 'lint', customPlugRepo, '--strict'], {
+        encoding: 'utf8',
+      });
+      assert.equal(symlinkLint.status, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exits with code 130 without stack trace when interactive prompt is cancelled', () => {
+    const cancelRun = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        'process.stdin.isTTY = true; process.stdout.isTTY = true; await import("./bin/cli.mjs");',
+      ],
+      {
+        cwd: ROOT,
+        input: '\x03',
+        encoding: 'utf8',
+      }
+    );
+    assert.equal(cancelRun.status, 130, `stderr=${cancelRun.stderr}`);
+    assert.doesNotMatch(cancelRun.stderr, /PromptCancelledError|at /);
   });
 });

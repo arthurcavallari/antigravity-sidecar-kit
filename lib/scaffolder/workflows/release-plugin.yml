@@ -1,0 +1,186 @@
+name: release
+
+# Trigger from the Actions tab (Run workflow -> patch/minor/major or exact version),
+# or push a tag like v1.0.0 (matching package.json) to build and release the Antigravity plugin bundle.
+# If package.json#private is set to false, tag pushes also publish the npm package via trusted publishing (OIDC).
+#
+# A one-click release bumps the version on main and pushes the tag; the tag push starts this workflow
+# again, and that run publishes. main requires the test checks, which the workflow's own token can't
+# satisfy or bypass, so the two pushes use RELEASE_TOKEN: a fine-grained personal access token of the
+# repo owner (Contents: read and write on this repo), who is an admin the protection lets through. The
+# token is given only to the step that pushes, never to npm install or the tests. Before bumping, the
+# run checks that the token works and that the tests passed on the commit it is releasing. dry_run does those
+# checks, bumps and runs the tests, then stops.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump (ignored if exact version is provided)'
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: 'Optional exact version (e.g. 1.1.0)'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Bump and run the tests, then stop: nothing is pushed or published'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # create the GitHub release and attach plugin tarball
+      actions: read # read the test runs on the commit being released
+      id-token: write # trusted publishing and provenance when package.json#private is false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
+      DRY_RUN: ${{ inputs.dry_run == true }}
+    steps:
+      - name: Check the release token (workflow_dispatch, dry runs too)
+        if: env.IS_DISPATCH == 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "${RELEASE_TOKEN}" ]; then
+            echo "::error::The RELEASE_TOKEN secret is not set. A release pushes to main with it; see the comment at the top of this workflow."
+            exit 1
+          fi
+          # Proves the token is valid, hasn't expired and was granted this repo, before anything is bumped
+          if ! access="$(GH_TOKEN="${RELEASE_TOKEN}" gh api "repos/${GITHUB_REPOSITORY}" --jq '"\(.permissions.push) \(.permissions.admin)"')"; then
+            echo "::error::GitHub rejected RELEASE_TOKEN. Is it expired or revoked, or not granted ${GITHUB_REPOSITORY}?"
+            exit 1
+          fi
+          case "${access}" in
+            "true true") echo "RELEASE_TOKEN works: its owner can push to ${GITHUB_REPOSITORY} and is an admin." ;;
+            "true "*) echo "::warning::RELEASE_TOKEN can push, but GitHub does not report its owner as an admin (${access}). Pushes to main need an admin to get past the required checks; the real push will tell." ;;
+            *) echo "::error::RELEASE_TOKEN cannot push to ${GITHUB_REPOSITORY} (push/admin: ${access}). Give it Contents: Read and write."; exit 1 ;;
+          esac
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Use an npm with trusted publishing support (>= 11.5.1)
+        run: npm install -g npm@^11.5.1
+      - name: Check the tests passed on the commit being released (workflow_dispatch)
+        if: env.IS_DISPATCH == 'true'
+        run: |
+          sha="$(git rev-parse HEAD)"
+          passed="$(gh run list --workflow test.yml --commit "${sha}" --json status,conclusion --jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length')"
+          other="$(gh run list --workflow test.yml --commit "${sha}" --json status,conclusion --jq '[.[] | select(.status != "completed" or .conclusion != "success")] | length')"
+          if [ "${passed}" -lt 1 ] || [ "${other}" -gt 0 ]; then
+            echo "::error::The test workflow has not passed on ${sha} (${passed} passed, ${other} failed or still running). Wait for it or fix it, then run this again."
+            exit 1
+          fi
+          echo "The tests passed on ${sha}."
+      - name: Bump version (workflow_dispatch) or verify tag (push)
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${IS_DISPATCH}" = "true" ]; then
+            if [ "${REF_NAME}" != "main" ]; then
+              echo "::error::workflow_dispatch releases must run from main (got ${REF_NAME})"
+              exit 1
+            fi
+            target="${INPUT_VERSION:-${INPUT_BUMP}}"
+            case "${target}" in
+              patch|minor|major|[0-9]*.[0-9]*.[0-9]*) ;;
+              *)
+                echo "::error::Invalid version or bump target: ${target}"
+                exit 1
+                ;;
+            esac
+            npm version "${target}" --no-git-tag-version
+            node -e '
+              const fs = require("node:fs");
+              const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+              if (fs.existsSync("plugin/plugin.json")) {
+                const manifest = JSON.parse(fs.readFileSync("plugin/plugin.json", "utf8"));
+                manifest.version = pkg.version;
+                fs.writeFileSync("plugin/plugin.json", JSON.stringify(manifest, null, 2) + "\n");
+              }
+            '
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+            if [ "${REF_NAME}" != "v${VERSION}" ]; then
+              echo "::error::Tag ${REF_NAME} does not match package.json version ${VERSION}"
+              exit 1
+            fi
+          fi
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run validate:manifest
+      - run: npm run build:plugin
+      - run: npm run test:pack
+      - name: Dry run finished
+        if: env.IS_DISPATCH == 'true' && env.DRY_RUN == 'true'
+        run: |
+          echo "Dry run: bumped to $(node -p "require('./package.json').version") and the tests passed. Nothing was pushed or published."
+      - name: Commit the release to main and push the tag (workflow_dispatch)
+        if: env.IS_DISPATCH == 'true' && env.DRY_RUN != 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          if [ -f package-lock.json ]; then git add package-lock.json; fi
+          if [ -f plugin/plugin.json ]; then git add plugin/plugin.json; fi
+          git commit -m "chore(release): ${version}"
+          git tag "v${version}"
+          remote="https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # main first, so a refused push can't leave a tag behind. The tag push starts the publish run.
+          git push "${remote}" HEAD:main
+          git push "${remote}" "refs/tags/v${version}"
+          echo "Pushed v${version} to main. The tag starts the run that publishes it."
+      - name: Publish to npm when package is public (tag push)
+        if: env.IS_DISPATCH != 'true'
+        run: |
+          is_private="$(node -p "Boolean(require('./package.json').private)")"
+          if [ "${is_private}" = "true" ]; then
+            echo "Skipping npm publish because package.json#private is true."
+          else
+            npm publish --provenance --access public
+          fi
+      - name: Create GitHub Release (tag push)
+        if: env.IS_DISPATCH != 'true'
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            gh release create "${tag}" --title "${tag}" --generate-notes --verify-tag
+          fi
+      - name: Attach Antigravity plugin bundle to GitHub Release (tag push)
+        if: env.IS_DISPATCH != 'true'
+        # Hangar installs the plugin from this tarball, verified by its sha256
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          npm run build:plugin
+          gh release upload "v${version}" \
+            "dist/plugin/{{PLUGIN_NAME}}-plugin-${version}.tgz" \
+            "dist/plugin/{{PLUGIN_NAME}}-plugin-${version}.tgz.sha256" --clobber
