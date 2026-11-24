@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
@@ -1236,7 +1237,11 @@ describe('Task 6: registry-entry & Hangar tier inference', () => {
         agyValidate: false,
       });
       assert.equal(fromShaFileOnly.release.sha256, downloadedCiSha);
-      assert.equal(existsSync(tarPath), false, 'must not build local .tgz when .tgz.sha256 exists');
+      assert.equal(
+        readdirSync(join(pluginDir, 'dist', 'plugin')).includes('agy-prism-plugin-1.0.0.tgz'),
+        false,
+        'must not build local .tgz when .tgz.sha256 exists'
+      );
 
       // Malformed .tgz.sha256 throws
       writeFileSync(shaPath, 'corrupt-digest  agy-prism-plugin-1.0.0.tgz\n', 'utf8');
@@ -1253,12 +1258,22 @@ describe('Task 6: registry-entry & Hangar tier inference', () => {
       // (c4) Existing .tgz alone (without .tgz.sha256) hashes existing .tgz without overwriting it
       removeLinkOrDir(shaPath);
       writeFileSync(tarPath, sentinelBytes);
+      const pluginPkgPath = join(pluginDir, 'package.json');
+      const pluginPkg = JSON.parse(readFileSync(pluginPkgPath, 'utf8'));
+      pluginPkg.author = 'Prism <<script>bad> Dev <prism@example.com> (https://example.com)';
+      writeJsonNoBom(pluginPkgPath, pluginPkg);
+      const pluginJsonPath = join(pluginDir, 'plugin', 'plugin.json');
+      const pluginManifest = JSON.parse(readFileSync(pluginJsonPath, 'utf8'));
+      delete pluginManifest.author;
+      writeJsonNoBom(pluginJsonPath, pluginManifest);
+
       const fromTarOnly = buildRegistryEntry({
         repoRoot: pluginDir,
         kitRoot: KIT_ROOT,
         agyValidate: false,
       });
       assert.equal(fromTarOnly.release.sha256, sentinelSha);
+      assert.equal(fromTarOnly.author.name, 'Prism Dev');
       assert.equal(Buffer.compare(readFileSync(tarPath), sentinelBytes), 0);
 
       // (d) Guards srcPluginDir against repo escape and symlinks

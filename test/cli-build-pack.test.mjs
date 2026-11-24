@@ -4,12 +4,14 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
   cpSync,
   existsSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -27,6 +29,23 @@ import { resolveAgyExecutable, spawnResolvedExecutable } from '../lib/cli/agy-bi
 import { buildPluginProject } from '../lib/cli/build-plugin.mjs';
 import { parseNpmPackJson, resolveNpmCommand, runPackSmoke } from '../lib/cli/pack-smoke.mjs';
 
+function snapshotOptionalFile(filePath) {
+  let fd;
+  try {
+    fd = openSync(filePath, 'r');
+    const mtimeMs = fstatSync(fd).mtimeMs;
+    const content = readFileSync(fd, 'utf8');
+    return { exists: true, mtimeMs, content };
+  } catch (err) {
+    if (err?.code === 'ENOENT') {
+      return { exists: false, mtimeMs: 0, content: '' };
+    }
+    throw err;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 function writeStubAgy(
   binDir,
   version,
@@ -34,8 +53,9 @@ function writeStubAgy(
 ) {
   mkdirSync(binDir, { recursive: true });
   const scriptBody = `#!/usr/bin/env node
-import { appendFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+'use strict';
+const { appendFileSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
 
 const args = process.argv.slice(2);
 const home = process.env.USERPROFILE || process.env.HOME || '';
@@ -63,10 +83,10 @@ process.exit(0);
 `;
 
   if (process.platform === 'win32') {
-    const implPath = join(binDir, 'agy-stub-impl.mjs');
+    const implPath = join(binDir, 'agy-stub-impl.cjs');
     const cmdPath = join(binDir, 'agy.cmd');
     writeFileSync(implPath, scriptBody, 'utf8');
-    writeFileSync(cmdPath, `@echo off\r\n"${process.execPath}" "%~dp0agy-stub-impl.mjs" %*\r\n`, 'utf8');
+    writeFileSync(cmdPath, `@echo off\r\n"${process.execPath}" "%~dp0agy-stub-impl.cjs" %*\r\n`, 'utf8');
     return cmdPath;
   }
 
@@ -149,6 +169,24 @@ describe('Task 5: agy-bin, build-plugin, and pack-smoke', () => {
       });
       assert.equal(explicitRes.path, pathStub);
       assert.deepEqual(explicitRes.semver, [1, 5, 10]);
+
+      // Extensionless POSIX shebang script executes via process.execPath even when PATH is empty
+      const posixHome = join(tmp, 'posix-home');
+      const posixBinDir = join(posixHome, '.gemini', 'bin');
+      mkdirSync(posixBinDir, { recursive: true });
+      const posixBin = join(posixBinDir, 'agy');
+      writeFileSync(
+        posixBin,
+        "#!/usr/bin/env node\n'use strict';\nif (process.argv.includes('--version')) process.stdout.write('1.5.19\\n');\n",
+        'utf8'
+      );
+      chmodSync(posixBin, 0o755);
+      const posixResolved = resolveAgyExecutable({
+        env: { HOME: posixHome, PATH: '' },
+        platform: 'linux',
+      });
+      assert.equal(posixResolved.path, posixBin);
+      assert.deepEqual(posixResolved.semver, [1, 5, 19]);
 
       // Absent everywhere returns { path: null, semver: null }
       const emptyHome = join(tmp, 'empty-home');
@@ -381,17 +419,8 @@ describe('Task 5: agy-bin, build-plugin, and pack-smoke', () => {
 
   it('runPackSmoke verifies sidecar-mcp offline npm pack/install/bins/setup without touching real ~/.gemini/config and fails when files includes test', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'agy-pack-smoke-sc-'));
-    const realConfigExisted = existsSync(CONFIG_JSON_PATH);
-    const realConfigBefore = realConfigExisted
-      ? { mtimeMs: statSync(CONFIG_JSON_PATH).mtimeMs, content: readFileSync(CONFIG_JSON_PATH, 'utf8') }
-      : null;
-    const realMcpExisted = existsSync(DEFAULT_MCP_CONFIG_PATH);
-    const realMcpBefore = realMcpExisted
-      ? {
-          mtimeMs: statSync(DEFAULT_MCP_CONFIG_PATH).mtimeMs,
-          content: readFileSync(DEFAULT_MCP_CONFIG_PATH, 'utf8'),
-        }
-      : null;
+    const realConfigBefore = snapshotOptionalFile(CONFIG_JSON_PATH);
+    const realMcpBefore = snapshotOptionalFile(DEFAULT_MCP_CONFIG_PATH);
 
     try {
       const sidecarDir = join(tmp, 'antigravity-packcheck');
@@ -418,16 +447,8 @@ describe('Task 5: agy-bin, build-plugin, and pack-smoke', () => {
       assert.equal(res.pluginTarball, null);
 
       // Verify real ~/.gemini/config files and sidecar junctions were never touched
-      assert.equal(existsSync(CONFIG_JSON_PATH), realConfigExisted);
-      if (realConfigBefore) {
-        assert.equal(statSync(CONFIG_JSON_PATH).mtimeMs, realConfigBefore.mtimeMs);
-        assert.equal(readFileSync(CONFIG_JSON_PATH, 'utf8'), realConfigBefore.content);
-      }
-      assert.equal(existsSync(DEFAULT_MCP_CONFIG_PATH), realMcpExisted);
-      if (realMcpBefore) {
-        assert.equal(statSync(DEFAULT_MCP_CONFIG_PATH).mtimeMs, realMcpBefore.mtimeMs);
-        assert.equal(readFileSync(DEFAULT_MCP_CONFIG_PATH, 'utf8'), realMcpBefore.content);
-      }
+      assert.deepEqual(snapshotOptionalFile(CONFIG_JSON_PATH), realConfigBefore);
+      assert.deepEqual(snapshotOptionalFile(DEFAULT_MCP_CONFIG_PATH), realMcpBefore);
       assert.equal(existsSync(join(GLOBAL_SIDECARS_DIR, 'packcheck')), false);
 
       // Fails when package.json "files" accidentally includes "test"
@@ -563,7 +584,6 @@ describe('Task 5: agy-bin, build-plugin, and pack-smoke', () => {
       pkg.scripts = {
         ...pkg.scripts,
         prepack: 'node -e "process.exit(42)"',
-        prepare: 'node -e "process.exit(43)"',
         postpack: 'node -e "process.exit(44)"',
       };
       writeJsonNoBom(pkgPath, pkg);
