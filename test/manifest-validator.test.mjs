@@ -185,6 +185,29 @@ describe('manifest-validator', () => {
       assert.equal(deprecatedCamel.warnings[0].ruleId, 'SIDECAR-DRIFT-04');
       assert.match(deprecatedCamel.warnings[0].message, /deprecated.*allowed_http_hosts/i);
     });
+
+    it('accepts 2.35.2 sandbox.allowed_rpcs / allowedRpcs and rejects blank or non-string entries', () => {
+      const validBase = { command: 'node', args: ['launch.mjs'] };
+      const ok = validateSidecarJson({
+        ...validBase,
+        sandbox: { allowed_rpcs: ['GetUserStatus'], allowedRpcs: [] },
+      });
+      assert.equal(ok.valid, true);
+      assert.equal(ok.errors.length, 0);
+      assert.equal(ok.warnings.length, 0);
+
+      for (const bad of [
+        { allowed_rpcs: 'GetUserStatus' },
+        { allowed_rpcs: [''] },
+        { allowedRpcs: ['  '] },
+        { allowed_rpcs: [42] },
+      ]) {
+        const res = validateSidecarJson({ ...validBase, sandbox: bad });
+        assert.equal(res.valid, false);
+        assert.equal(res.errors.length, 1);
+        assert.equal(res.errors[0].ruleId, 'SIDECAR-DRIFT-04');
+      }
+    });
   });
 
   describe('validateHubManifest', () => {

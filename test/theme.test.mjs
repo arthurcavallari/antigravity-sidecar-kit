@@ -163,12 +163,17 @@ describe('antigravity-sidecar-kit/theme unified resolver and stylesheet proxy', 
     assert.equal(onyxLightNormal.cssVariables['--muted-foreground'], '#71717A');
     assert.equal(onyxLightNormal.cssVariables['--placeholder'], '#8E8E95');
     assert.equal(onyxLightNormal.cssVariables['--onyx-frame'], '#F9F9F9');
+    assert.equal(onyxLightNormal.cssVariables['--link'], '#1d588e');
 
     const onyxLightHigh = resolveHostTheme({ themeMode: 1, preset: 'Onyx Light', contrast: 2 });
     assert.equal(onyxLightHigh.cssVariables['--foreground'], '#000000');
     assert.equal(onyxLightHigh.cssVariables['--primary'], '#2560A3');
     assert.equal(onyxLightHigh.cssVariables['--shell'], '#F3F3F3');
     assert.equal(onyxLightHigh.cssVariables['--secondary-foreground'], '#27272A');
+    assert.equal(onyxLightHigh.cssVariables['--link'], '#1d588e');
+
+    const solarizedHc = resolveHostTheme({ themeMode: 1, preset: 'Solarized Light', contrast: 2 });
+    assert.equal(solarizedHc.cssVariables['--link'], '#1d588e');
 
     // Plugin-contributed theme seeds (OYc / PluginThemeSeedsSchema: foreground, primaryForeground, codeForeground)
     const pluginTheme = resolveHostTheme({

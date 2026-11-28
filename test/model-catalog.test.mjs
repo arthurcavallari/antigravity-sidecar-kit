@@ -240,4 +240,134 @@ describe('antigravity-sidecar-kit/models dynamic model catalog', () => {
     assert.equal(mergedSnap.modelsBySlug['gpt-oss-120b-medium'].ceiling, 80000);
     assert.equal(mergedSnap.enumsToSlug.MODEL_OPENAI_GPT_OSS_120B_MEDIUM, 'gpt-oss-120b-medium');
   });
+
+  it('demotes sunsetting 4 Argon and 3.8 Flash (and Leaving Soon tags) in favor of 4 Neon and 4 Hydrogen while preserving Argon-only fixtures', () => {
+    const empty = parseAvailableModelsCatalog({}, {}, '2026-12-01T00:00:00Z');
+    assert.equal(empty.families.geminiFlagship, '4 Neon');
+    assert.equal(empty.families.geminiFast, '4 Hydrogen');
+    assert.equal(empty.families.geminiTopEffort, 'XHigh');
+
+    const mixed = parseAvailableModelsCatalog(
+      {
+        response: {
+          defaultAgentModelId: 'gemini-4-argon-high',
+          tieredModelIds: { flash: ['gemini-3.8-flash-high', 'gemini-4-hydrogen-high'] },
+          agentModelSorts: [
+            {
+              groups: [
+                {
+                  modelIds: [
+                    'gemini-4-argon-high',
+                    'gemini-4-neon-xhigh',
+                    'gemini-3.8-flash-high',
+                    'gemini-4-hydrogen-high',
+                  ],
+                },
+              ],
+            },
+          ],
+          models: {
+            'gemini-4-argon-high': {
+              model: 'MODEL_PLACEHOLDER_M417',
+              displayName: 'Gemini 4 Argon (High)',
+              modelProvider: 'MODEL_PROVIDER_GOOGLE',
+              thinkingLevel: 3,
+            },
+            'gemini-4-neon-xhigh': {
+              model: 'MODEL_PLACEHOLDER_M535',
+              displayName: 'Gemini 4 Neon (XHigh)',
+              modelProvider: 'MODEL_PROVIDER_GOOGLE',
+              thinkingLevel: 100,
+            },
+            'gemini-3.8-flash-high': {
+              model: 'MODEL_PLACEHOLDER_M318',
+              displayName: 'Gemini 3.8 Flash (High)',
+              modelProvider: 'MODEL_PROVIDER_GOOGLE',
+              thinkingLevel: 3,
+            },
+            'gemini-4-hydrogen-high': {
+              model: 'MODEL_PLACEHOLDER_M525',
+              displayName: 'Gemini 4 Hydrogen (High)',
+              modelProvider: 'MODEL_PROVIDER_GOOGLE',
+              thinkingLevel: 3,
+            },
+          },
+        },
+      },
+      {
+        clientModelConfigs: [
+          {
+            modelId: 'gemini-4-argon-high',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M417' },
+            tagTitle: 'Leaving Soon',
+          },
+        ],
+      },
+      '2026-11-28T00:00:00Z'
+    );
+    assert.equal(mixed.families.geminiFlagship, '4 Neon');
+    assert.equal(mixed.families.geminiTopEffort, 'XHigh');
+    assert.equal(mixed.families.geminiFast, '4 Hydrogen');
+
+    const argonOnly = parseAvailableModelsCatalog({
+      response: {
+        models: {
+          'gemini-4-argon-high': {
+            model: 'MODEL_PLACEHOLDER_M417',
+            displayName: 'Gemini 4 Argon (High)',
+            modelProvider: 'MODEL_PROVIDER_GOOGLE',
+            thinkingLevel: 3,
+          },
+        },
+      },
+    });
+    assert.equal(argonOnly.families.geminiFlagship, '4 Argon');
+    assert.equal(argonOnly.families.geminiTopEffort, 'High');
+
+    const flashOnly = parseAvailableModelsCatalog({
+      response: {
+        models: {
+          'gemini-3.8-flash-high': {
+            model: 'MODEL_PLACEHOLDER_M318',
+            displayName: 'Gemini 3.8 Flash (High)',
+            modelProvider: 'MODEL_PROVIDER_GOOGLE',
+            thinkingLevel: 3,
+          },
+        },
+      },
+    });
+    assert.equal(flashOnly.families.geminiFast, '3.8 Flash');
+
+    const configOnly = parseAvailableModelsCatalog(
+      {},
+      {
+        clientModelConfigs: [
+          {
+            modelId: 'gemini-4-argon-high',
+            label: 'Gemini 4 Argon (High)',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M417' },
+            tagTitle: 'Leaving Soon',
+          },
+          {
+            modelId: 'gemini-4-hydrogen-high',
+            label: 'Gemini 4 Hydrogen (High)',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M525' },
+          },
+          {
+            modelId: 'gemini-3.8-flash-high',
+            label: 'Gemini 3.8 Flash (High)',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M318' },
+            tagTitle: 'Leaving Soon',
+          },
+          {
+            modelId: 'gemini-4-neon-xhigh',
+            label: 'Gemini 4 Neon (XHigh)',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M535' },
+          },
+        ],
+      }
+    );
+    assert.equal(configOnly.families.geminiFlagship, '4 Neon');
+    assert.equal(configOnly.families.geminiFast, '4 Hydrogen');
+  });
 });
