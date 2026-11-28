@@ -337,5 +337,37 @@ describe('antigravity-sidecar-kit/models dynamic model catalog', () => {
       },
     });
     assert.equal(flashOnly.families.geminiFast, '3.8 Flash');
+
+    const configOnly = parseAvailableModelsCatalog(
+      {},
+      {
+        clientModelConfigs: [
+          {
+            modelId: 'gemini-4-argon-high',
+            label: 'Gemini 4 Argon (High)',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M417' },
+            tagTitle: 'Leaving Soon',
+          },
+          {
+            modelId: 'gemini-4-hydrogen-high',
+            label: 'Gemini 4 Hydrogen (High)',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M525' },
+          },
+          {
+            modelId: 'gemini-3.8-flash-high',
+            label: 'Gemini 3.8 Flash (High)',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M318' },
+            tagTitle: 'Leaving Soon',
+          },
+          {
+            modelId: 'gemini-4-neon-xhigh',
+            label: 'Gemini 4 Neon (XHigh)',
+            modelOrAlias: { model: 'MODEL_PLACEHOLDER_M535' },
+          },
+        ],
+      }
+    );
+    assert.equal(configOnly.families.geminiFlagship, '4 Neon');
+    assert.equal(configOnly.families.geminiFast, '4 Hydrogen');
   });
 });
